@@ -5,3 +5,6 @@ __pycache__/
 .DS_Store
 *.egg-info/
 .venv/
+animation/
+animation_assets/
+media/
