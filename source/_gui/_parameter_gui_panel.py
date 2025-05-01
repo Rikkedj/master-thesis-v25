@@ -30,7 +30,7 @@ from libemg.environments.controllers import ClassifierController, RegressorContr
 from controller import Prosthesis, ProsthesisController
 
 # Class made by me
-class ModelConfigPanel:
+class ParameterAdjustmentPanel:
     '''
     The Model Configuration Panel for configuring the machine learning model. 
     Parameters
@@ -215,8 +215,8 @@ class ModelConfigPanel:
                         callback=self._handle_save_dialog_callback, # Callback for OK/Cancel
                         tag='save_config_tag',     # Tag for the file dialog
                         width=700, height=400,
-                        default_filename="controller_config.json",
-                        default_path=str(Path('./controller').absolute()), # Use forward slash
+                        default_filename="parameters-adjustments",
+                        default_path=str(Path('./post_training_parameters').absolute()), # Use forward slash
                         modal=True                  # Block other interaction
                         ):
                             dpg.add_file_extension(".json", color=(0, 255, 0, 255)) # Filter for json
@@ -236,12 +236,6 @@ class ModelConfigPanel:
         """Opens the file save dialog."""
         # Show the pre-defined file dialog
         dpg.show_item('save_config_tag')
-        # 1. Save the configuration to a file
-        # open window to select where to save the configuration
-        # Save the configuration to a file
-        # Check if the file already exists, if so, ask if the user wants to overwrite it
-        # If the file does not exist, create it
-        # Save the configuration to a file
 
     def _handle_save_dialog_callback(self, sender, app_data):
         """Handles the result of the file save dialog."""
@@ -262,7 +256,7 @@ class ModelConfigPanel:
         #     self._show_overwrite_confirmation_dialog(file_path)
         # else:
         #     # File doesn't exist, save directly
-        self._save_configuration_to_file(file_path)
+        self._save_configuration_to_file(file_path) # Always overwrite at this point
 
 
     def _save_configuration_to_file(self, file_path: Path):
@@ -270,7 +264,8 @@ class ModelConfigPanel:
         try:
             # Ensure parent directory exists
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            self.prosthesis_controller.set_configuration(gains=[self.gain_mf1, self.gain_mf2], thr_angle_mf1=self.thr_angle_mf1, thr_angle_mf2=self.thr_angle_mf2,deadband=self.deadband) # Set the configuration in the prosthesis controller
+            self.get_settings() # Get the settings from the GUI
+            self.prosthesis_controller.set_configuration(gain_mf1=self.gain_mf1, gain_mf2=self.gain_mf2, thr_angle_mf1=self.thr_angle_mf1, thr_angle_mf2=self.thr_angle_mf2,deadband=self.deadband) # Set the configuration in the prosthesis controller
             self.prosthesis_controller.write_to_json(file_path) # Save the configuration to a file
             # Convert Manager.dict proxy to a standard dict 
             # config_to_save = dict(self.configuration)

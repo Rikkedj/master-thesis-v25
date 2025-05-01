@@ -19,13 +19,13 @@ from libemg.environments.controllers import ClassifierController, RegressorContr
 from libemg.environments.fitts import ISOFitts, FittsConfig
 from libemg.prosthesis import Prosthesis, ActuatorFunctionSelection
 
-from configGUI import ML_GUI
+from parameterGUI import ParameterAdjustmentGUI
 
 class ProsthesisControlGUI:
     """Class to Simultaneous Proportional Prosthesis control system. Inspired by the Menu class in Menu.py.
     Note! Only regression is supported for now.
     """
-    def __init__(self, feature_list=None):
+    def __init__(self):
         streamer, sm = delsys_streamer(channel_list=[0,1,2,9,13]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
         # Create online data handler to listen for the data
         self.odh = OnlineDataHandler(sm)
@@ -33,11 +33,10 @@ class ProsthesisControlGUI:
         self.model = None # The classifier or regressor
         self.model_str = None
         
-        self.feature_list = feature_list # Feature list to be used in the training protocol. Default is HTD features.
-
         #self.training_data_folder = Path('data', 'classification').absolute().as_posix() # Folder where training data is stored. Used in set_up_model and ML_GUI, hence here for consistency. Changed in regression_selected() to regression data folder. Nvm, that doesn't work
 
         # Initialize motor functions for the training protocol
+        #TODO: Consider taking motor function in as input
         self.motor_functions = {
             'hand_open_close': (1, 0),          # Movement along x-axis
             'pronation_supination': (0, 1),     # Movement along y-axis
@@ -137,12 +136,11 @@ class ProsthesisControlGUI:
         if self.regression_selected():
             args = {'media_folder': 'animation/', 'data_folder': Path('data', 'regression').absolute().as_posix(), 'rep_time': 50} # CHANGED 22.04. DON'T KNOW IF IT IS BEST TO HAVE SELF.ARGS OR ARGS
         else:
-            args = {'media_folder': 'images/', 'data_folder': Path('data', 'classification').absolute().as_posix()}
+            args = {'media_folder': 'media/images/', 'data_folder': Path('data', 'classification').absolute().as_posix()}
         
         training_ui = GUI(self.odh, args=args, width=1000, height=1000, gesture_height=700, gesture_width=700)
-        training_ui.download_gestures([1,2,3,4,5], "images/") # Downloading gestures from github repo. Videos for simultaneous gestures are located in images_master/videos
-        self.create_animation()
-        # maybe have a sepearte window where in GUI where you user can give parameters before making animation?           
+        training_ui.download_gestures([1,2,3,4,5], "media/images/") # Downloading gestures from github repo. Videos for simultaneous gestures are located in images_master/videos
+        self.create_animation() # Create animations for the motor functions used in the training protocol.
         training_ui.start_gui()
         self.initialize_ui()
 
@@ -153,7 +151,7 @@ class ProsthesisControlGUI:
         else:
             data_folder = Path('data', 'classification').absolute().as_posix()
         args = {'window_size':150, 'window_increment':50, 'deadband': 0.1, 'thr_angle_mf1': 45, 'thr_angle_mf2': 45, 'gain_mf1': 1, 'gain_mf2': 1}
-        model_ui = ML_GUI(online_data_handler=self.odh, regression_selected=self.regression_selected(), model_str=self.model_str.get(), axis_media=self.axis_media, args=args, training_data_folder=data_folder)
+        model_ui = ParameterAdjustmentGUI(online_data_handler=self.odh, regression_selected=self.regression_selected(), model_str=self.model_str.get(), axis_media=self.axis_media, args=args, training_data_folder=data_folder)
         model_ui.start_gui()
         self.initialize_ui()
     
@@ -325,16 +323,19 @@ class ProsthesisControlGUI:
                 continue
 
             # Generate base movement
-            base_motion = self._generate_base_signal()
+            #base_motion = self._generate_base_signal()
+            base_motion = self.generate_trapezoid_signal(sampling_rate=24, transition_duration=0.5, hold_duration=1, rest_duration=2) # 24 fps, 0.5s transition, 1s hold, 2s rest
             # Apply movement transformation
             x_coords = x_factor * base_motion
             y_coords = y_factor * base_motion
 
             # Calculate angles (in radians) for the arrow animator
-            angles = np.arctan2(y_coords, x_coords)
+            #angles = np.arctan2(y_coords, x_coords)
             #angles = np.arctan2(y_factor, x_factor)
             # Apply movement transformation
-            coordinates = np.hstack((x_coords, y_coords, angles))  
+            #coordinates = np.hstack((x_coords, y_coords, angles))  
+            coordinates = np.stack((x_coords, y_coords), axis=1)
+
             
             #animator = MediaGridAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_media_paths=self.axis_media_paths, figsize=(10,10), normalize_distance=True, show_boundary=True, tpd=2)#, plot_line=True) # plot_line does not work
             #animator.plot_center_icon(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, xlabel='MF 1', ylabel='MF 2')
@@ -343,6 +344,20 @@ class ProsthesisControlGUI:
             #arrow_animator = ArrowPlotAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_images=self.axis_media, figsize=(10,10), normalize_distance=True, show_boundary=True, tpd=2)#, plot_line=True) # plot_line does not work
             #arrow_animator.save_plot_video(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, verbose=True)
 
+    def generate_trapezoid_signal(self, sampling_rate, transition_duration, hold_duration, rest_duration):
+        """ Generate a trapezoidal base signal: 0 -> 1 -> hold -> -1 -> hold -> 0 """
+        num_transition = max(1, int(transition_duration * sampling_rate))
+        num_hold = max(1, int(hold_duration * sampling_rate))
+
+        ramp_up = np.linspace(0, 1, num_transition, endpoint=False)
+        hold_high = np.ones(num_hold)
+        ramp_down = np.linspace(1, -1, 2 * num_transition, endpoint=False)
+        hold_low = -np.ones(num_hold)
+        ramp_back = np.linspace(-1, 0, num_transition)
+        rest = np.zeros(int(rest_duration * sampling_rate))
+
+        signal = np.concatenate((ramp_up, hold_high, ramp_down, hold_low, ramp_back, rest))
+        return signal
 
     def _generate_base_signal(self):
         """Generates a sinusoidal motion profile for training animation."""

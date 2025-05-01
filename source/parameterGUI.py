@@ -1,10 +1,10 @@
 import dearpygui.dearpygui as dpg
 import time
 import inspect
-from _gui._config_panel import ModelConfigPanel # Could remove this to my own folder or something to make it clear its made by me
+from _gui._parameter_gui_panel import ParameterAdjustmentPanel # Could remove this to my own folder or something to make it clear its made by me
 
 
-class ML_GUI: # Kalle det CONTROL_SYSTEM_GUI elns?
+class ParameterAdjustmentGUI: # Kalle det CONTROL_SYSTEM_GUI elns?
     '''
     The GUI for configuring the prediction model, either the classifier or the regressor, and the controller.
 
@@ -109,9 +109,9 @@ class ML_GUI: # Kalle det CONTROL_SYSTEM_GUI elns?
         self._model_config_callback()
                 
     def _model_config_callback(self):
-        panel_arguments = list(inspect.signature(ModelConfigPanel.__init__).parameters) # Get the arguments of the ModelConfigPanel class
+        panel_arguments = list(inspect.signature(ParameterAdjustmentPanel.__init__).parameters) # Get the arguments of the ModelConfigPanel class
         passed_arguments = {i: self.args[i] for i in self.args.keys() if i in panel_arguments} 
-        self.mcp = ModelConfigPanel(**passed_arguments, gui=self, training_data_folder=self.training_data_folder) # Create the ModelConfigPanel object
+        self.mcp = ParameterAdjustmentPanel(**passed_arguments, gui=self, training_data_folder=self.training_data_folder) # Create the ModelConfigPanel object
         self.mcp.spawn_configuration_window()
 
     def _exit_window_callback(self):
