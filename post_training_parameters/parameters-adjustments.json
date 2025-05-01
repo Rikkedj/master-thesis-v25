@@ -1,0 +1,8 @@
+{
+    "gain_mf1": 1.0,
+    "gain_mf2": 1.0,
+    "thr_angle_mf1": 29,
+    "thr_angle_mf2": 45,
+    "deadband": 0.30000001192092896,
+    "num_motor_functions": 2
+}

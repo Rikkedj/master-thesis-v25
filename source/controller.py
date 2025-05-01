@@ -92,9 +92,9 @@ class ProsthesisController: # Made a specific controller-class for the prosthesi
         # Tanken her er å gjøre det mer generelt, altså hente gains og thresholds utfra
         # for hor mange predictions en leser, men er kanskje lettere 
         self.prosthesis = prosthesis if prosthesis else Prosthesis()
-        self.controller = controller if controller else RegressorController()
-        self.gains = [1, 1]  # Gains for each motor function -> try it like this, but maybe easier to have them seperated. The thought is to make it more modular, so you can add more motor functions if needed
-        #self.gain_mf2 = 1
+        self.controller = controller if controller else RegressorController() # Default to regressor controller
+        self.gain_mf1 = 1 
+        self.gain_mf2 = 1
         self.thr_angle_mf1 = 0.5
         self.thr_angle_mf2 = 0.5
         self.deadband = 0.1
@@ -122,7 +122,7 @@ class ProsthesisController: # Made a specific controller-class for the prosthesi
         print("No prediction data available.")
         return 0
     
-    def set_configuration(self, gains=None, thr_angle_mf1=None, thr_angle_mf2=None, deadband=None):
+    def set_configuration(self, gain_mf1=None, gain_mf2=None, thr_angle_mf1=None, thr_angle_mf2=None, deadband=None):
         """
         Set the configuration for the prosthetic device. NOTE! Could add checks here as well to ensure the values are within a certain range, or if they are valid values.
         Parameters:
@@ -132,8 +132,10 @@ class ProsthesisController: # Made a specific controller-class for the prosthesi
             thr_angle_mf2: Threshold angle for motor function 2 (float).
             deadband: Deadband value (float).
         """
-        if gains:
-            self.gains = gains
+        if gain_mf1:
+            self.gain_mf1 = gain_mf1
+        if gain_mf2:
+            self.gain_mf2 = gain_mf2
         if thr_angle_mf1:
             self.thr_angle_mf1 = thr_angle_mf1
         if thr_angle_mf2:
@@ -150,7 +152,8 @@ class ProsthesisController: # Made a specific controller-class for the prosthesi
             filename: The name of the JSON file (string).
         """
         config = {
-            'gains': self.gains,
+            'gain_mf1': self.gain_mf1,
+            'gain_mf2': self.gain_mf2,
             'thr_angle_mf1': self.thr_angle_mf1,
             'thr_angle_mf2': self.thr_angle_mf2,
             'deadband': self.deadband,
@@ -173,6 +176,8 @@ if __name__ == "__main__":
     controller = RegressorController(ip='127.0.0.1', port=5005)
     prost_controller = ProsthesisController(prosthesis=prosthesis, controller=controller)
     prost_controller.get_num_motor_functions()
+    prost_controller.set_configuration(gain_mf1=1.5, gain_mf2=2.0, thr_angle_mf1=0.6, thr_angle_mf2=0.7, deadband=0.05)
+    prost_controller.write_to_json("config.json")
     
     # Disconnect when done
     prosthesis.disconnect()
