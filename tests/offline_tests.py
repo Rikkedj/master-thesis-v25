@@ -36,15 +36,15 @@ def _match_metadata_to_data(metadata_file: str, data_file: str, class_map: dict)
 
 if __name__ == '__main__':
     # need to have the same amount of channels that you had when training the model
-    _, sm = delsys_streamer(channel_list=[0,4,8,9,13]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
-    odh = OnlineDataHandler(sm) # Offline datahandler on shared memory
+    #_, sm = delsys_streamer(channel_list=[0,4,8,9,13]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
+    #odh = OnlineDataHandler(sm) # Offline datahandler on shared memory
     
     ############ Set up regressor ########
     # Step 2.1: Parse offline training data
     WINDOW_SIZE = 150
     WINDOW_INCREMENT = 100
 
-    data_folder = "./data/04-01/"
+    data_folder = "data/regression/04-01/"
     json_path = os.path.join(data_folder, "collection_details.json")
 
     with open(json_path, 'r') as f:
@@ -77,6 +77,8 @@ if __name__ == '__main__':
 
     offline_dh = OfflineDataHandler()
     offline_dh.get_data('./', regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
+    offline_dh.visualize()
+    
     train_windows, train_metadata = offline_dh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
 
     # Step 2: Extract features from offline data
