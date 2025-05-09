@@ -98,6 +98,8 @@ class PredictionPlotter:
     axis_media: dict, default=None
         The axis media for the plot. Should be a dictionary with keys 'N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW' (or less) and values as the images or videos to be displayed.
         If None, the default images will be used.
+    real_time: bool, default=False
+        If True, the plot will be updated in real time. If False, the plot will be static. The latter is used when making an animation for system training.
     '''
     def __init__(self, 
                  axis_media_paths={ 
@@ -105,7 +107,9 @@ class PredictionPlotter:
                     'S': Path('images/gestures', 'hand_close.png'),
                     'E': Path('images/gestures', 'pronation.png'),
                     'W': Path('images/gestures', 'supination.png')
-                }):
+                }, 
+                real_time=False
+                ):
         # self.config = config
         # self.pred_queue = pred_queue
         self.SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff']
@@ -128,6 +132,7 @@ class PredictionPlotter:
         self.current_pred = np.array([0.0, 0.0]) # Store the latest prediction coords. NOTE! May not be necessary
         self.current_direction = 'NE' # Need this to know which video to play
         
+        self.real_time = real_time # If True, the plot will be updated in real time. If False, the plot will be static.
         #self._load_all_media() # Load media during initialization
        
 
@@ -219,7 +224,7 @@ class PredictionPlotter:
                  print(f"  Failed to load media for {location}: {os.path.basename(path)}")
         print("Finished loading axis media.")
                     
-    def _initialize_plot(self, config):
+    def _initialize_plot(self, config=None):
         '''Initialize the plot with a grid layout and configure axes for media and main plot. '''
         self.fig = plt.figure(figsize=(8, 8))
         # Define grid locations mapped to more descriptive names
@@ -244,19 +249,20 @@ class PredictionPlotter:
         self.ax_main.axis('equal') # Ensure aspect ratio is equal
       
         # Plot of predictions
-        self.tale_plot, = self.ax_main.plot([], [], 'o', color='gray', markersize=4, alpha=0.5, label='Tale')
-        self.current_plot, = self.ax_main.plot([], [], 'o', color='red', markersize=8, markeredgecolor='black', label='Current Prediction')
-        
-        # Create a circle for the deadband
-        self.circle = plt.Circle((0, 0), config["__mc_deadband"], color='r', fill=False, linestyle='dashed')
-        self.ax_main.add_patch(self.circle)
-        # Threshold lines
-        self.threshold_lines = [
-            self.ax_main.plot([], [], 'b')[0],
-            self.ax_main.plot([], [], 'b')[0],
-            self.ax_main.plot([], [], 'b')[0],
-            self.ax_main.plot([], [], 'b')[0]
-        ]
+        if self.real_time:
+            self.tale_plot, = self.ax_main.plot([], [], 'o', color='gray', markersize=4, alpha=0.5, label='Tale')
+            self.current_plot, = self.ax_main.plot([], [], 'o', color='red', markersize=8, markeredgecolor='black', label='Current Prediction')
+            
+            # Create a circle for the deadband
+            self.circle = plt.Circle((0, 0), config["__mc_deadband"], color='r', fill=False, linestyle='dashed')
+            self.ax_main.add_patch(self.circle)
+            # Threshold lines
+            self.threshold_lines = [
+                self.ax_main.plot([], [], 'b')[0],
+                self.ax_main.plot([], [], 'b')[0],
+                self.ax_main.plot([], [], 'b')[0],
+                self.ax_main.plot([], [], 'b')[0]
+            ]
 
         # --- Configure Surrounding Media Axes ---
         # could add some resizing logic here to make sure the images are not too big
@@ -392,6 +398,18 @@ class PredictionPlotter:
         # If not using blit=True, returning [] or the list is often fine.
         return updated_artists
     
+    def make_animation(self, coordinates, output_filepath=None):
+        """Creates an animation from the given coordinates."""
+        #self._initialize_plot(config)
+        if output_filepath:
+            labels_filepath = Path(output_filepath).with_suffix('.txt')
+            labels_filepath.parent.mkdir(parents=True, exist_ok=True)
+            np.savetxt(labels_filepath, coordinates, delimiter=',')
+
+        self._initialize_plot()
+        plt.plot(coordinates[:, 0], coordinates[:, 1], 'o', color='gray', markersize=4, alpha=0.5, label='Test')
+        plt.show()
+
     def run(self, config, pred_queue):
         #self._initialize_plot(config)
         self._initialize_plot(config)

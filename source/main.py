@@ -1,5 +1,3 @@
-
-
 from pathlib import Path
 
 import numpy as np
@@ -17,26 +15,30 @@ from libemg.feature_extractor import FeatureExtractor
 from libemg.emg_predictor import OnlineEMGClassifier, EMGClassifier, EMGRegressor, OnlineEMGRegressor
 from libemg.environments.controllers import ClassifierController, RegressorController
 from libemg.environments.fitts import ISOFitts, FittsConfig
-from libemg.prosthesis import Prosthesis, ActuatorFunctionSelection
+from libemg.prosthesis import Prosthesis, MotorFunctionSelector
 
 from parameterGUI import ParameterAdjustmentGUI
+from plotter import PredictionPlotter
 
 class ProsthesisControlGUI:
-    """Class to Simultaneous Proportional Prosthesis control system. Inspired by the Menu class in Menu.py.
-    Note! Only regression is supported for now.
+    """
+    Class for a Simultaneous Proportional Prosthesis control system. Inspired by the Menu class in Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git.
     """
     def __init__(self):
-        streamer, sm = delsys_streamer(channel_list=[0,1,2,9,13]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
+        streamer, sm = delsys_streamer(channel_list=[0,2,5,8]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
         # Create online data handler to listen for the data
         self.odh = OnlineDataHandler(sm)
         # Learning model
-        self.model = None # The classifier or regressor
-        self.model_str = None
+        self.predictor = None # The classifier or regressor object
+        self.model_str = None # The model string, used to identify the model type.
+        self.feature_list = None # The list of features to use for the model. If None, Hudgins Time Domain features are used.
         
-        #self.training_data_folder = Path('data', 'classification').absolute().as_posix() # Folder where training data is stored. Used in set_up_model and ML_GUI, hence here for consistency. Changed in regression_selected() to regression data folder. Nvm, that doesn't work
+        # The UDP IP and port of the controller. This is used to send the data from predictor to the controller.
+        self.controller_IP = '127.0.0.1'
+        self.controller_PORT = 5005 
 
         # Initialize motor functions for the training protocol
-        #TODO: Consider taking motor function in as input
+        #TODO: Consider taking only motor function as input, and give option if user wants combined movement training.
         self.motor_functions = {
             'hand_open_close': (1, 0),          # Movement along x-axis
             'pronation_supination': (0, 1),     # Movement along y-axis
@@ -44,35 +46,38 @@ class ProsthesisControlGUI:
             'diagonal_2': (1, -1)*1/np.sqrt(2),              # Diagonal movement (↘)
         }
         # TODO: Add images the simultanous gestures
-        self.axis_media = None
-        # {
-        #     'N': PILImage.open(Path('images/gestures', 'pronation.png')),
-        #     'S': PILImage.open(Path('images/gestures', 'supination.png')),
-        #     'E': PILImage.open(Path('images/gestures', 'hand_open.png')),
-        #     'W': PILImage.open(Path('images/gestures', 'hand_close.png')),
-        #     #'NE': cv2.VideoCapture(Path('images_master/videos', 'IMG_4930.MOV')),  # store path instead
-        #     #'NW': cv2.VideoCapture(Path('images_master/videos', 'IMG_4931.MOV'))
-        # }
-        # # ---- This is for when training with simultnoeus gestures gets implemented right ---
-        # self.axis_media_paths = {
-        #     'N': Path('images/gestures', 'pronation.png'),
-        #     'S': Path('images/gestures', 'supination.png'),
-        #     'E': Path('images/gestures', 'hand_open.png'),
-        #     'W': Path('images/gestures', 'hand_close.png'),
-        #     'NE': Path('images_master/videos', 'IMG_4930.MOV'), 
-        #     'NW': Path('images_master/videos', 'IMG_4931.MOV')
-        # }
+        self.axis_media = {
+            'N': PILImage.open(Path('media/images/gestures', 'pronation.png')),
+            'S': PILImage.open(Path('media/images/gestures', 'supination.png')),
+            'E': PILImage.open(Path('media/images/gestures', 'hand_open.png')),
+            'W': PILImage.open(Path('media/images/gestures', 'hand_close.png')),
+            'NE': PILImage.open(Path('media/images/gestures', 'open_pronate.png')), 
+            'NW': PILImage.open(Path('media/images/gestures', 'close_pronate.png')),
+            'SE': PILImage.open(Path('media/images/gestures', 'open_supinate.png')),
+            'SW': PILImage.open(Path('media/images/gestures', 'close_supinate.png'))
+            #'NE': cv2.VideoCapture(Path('images_master/videos', 'IMG_4930.MOV')),  # store path instead
+            #'NW': cv2.VideoCapture(Path('images_master/videos', 'IMG_4931.MOV'))
+        }
+        # # ---- This is for when training with simultaneous gestures gets implemented right ---
+        self.axis_media_paths = {
+            'N': Path('media/images/gestures', 'pronation.png'),
+            'S': Path('media/images/gestures', 'supination.png'),
+            'E': Path('media/images/gestures', 'hand_open.png'),
+            'W': Path('media/images/gestures', 'hand_close.png'),
+            'NE': Path('media/videos', 'IMG_4930.MOV'), 
+            'NW': Path('media/videos', 'IMG_4931.MOV')
+        }
         self.window = None
         self.initialize_ui()
         self.window.mainloop()
 
     def initialize_ui(self):
         '''
-        Initializes the UI for the training protocol. This is the main menu for the training protocol.
+        Initializes the UI for the prosthesis control system. This is the main menu for the system.
         The order of execution is as follows:
-        1. Choose which model you want. The suppored models are listed. Default is Regression with LR.
+        1. Choose which model you want. The suppored models are listed. Default is Regression with LR. Choose if you want regression (simultaneous control) or classification (pattern recognition).
         2. Train the model. This will open a new window where you can choose training parameters, such as window size, window increment, repetition of training, etc. 
-        3. After training you can configure and tune the model, such as adding deadband, gain and threshold angles.
+        3. After training you can adjust control parameters, such as adding deadband, gain and threshold angles.
         4. When model is trained and tuned, you can try the system with Isofitts or run the prosthesis. 
         '''
         # Create the simple menu UI:
@@ -88,11 +93,11 @@ class ProsthesisControlGUI:
         # Label 
         Label(self.window, font=("Arial bold", 20), text = 'Simultaneous Proportional Prosthesis Control').pack(pady=(10,20))
         # Train Model Button
-        Button(self.window, font=("Arial", 18), text = 'Get Training Data', command=self.launch_training).pack(pady=(0,20))
+        Button(self.window, font=("Arial", 18), text = 'System Training', command=self.launch_training).pack(pady=(0,20))
         # Visualize predictions
-        Button(self.window, font=("Arial", 18), text = 'Configure Control Settings', command=self.configure_model_callback).pack(pady=(0,20))
+        Button(self.window, font=("Arial", 18), text = 'Adjust Post-Training Parameters', command=self.adjust_param_callback).pack(pady=(0,20))
         # Run prosthesis
-        Button(self.window, font=("Arial", 18), text = 'Run Prosthesis', command=self.run_prosthesis).pack(pady=(0,20)) # Added 22.04. This may be in Configure Model -> try it out.
+        #Button(self.window, font=("Arial", 18), text = 'Run Prosthesis', command=self.run_prosthesis).pack(pady=(0,20)) # Added 22.04. This may be in Parameter Adjustment -> try it out.
         # Start Isofitts
         Button(self.window, font=("Arial", 18), text = 'Start Isofitts Test', command=self.start_test).pack(pady=(0,20))
 
@@ -113,64 +118,67 @@ class ProsthesisControlGUI:
         Label(self.window, text="Regressor Model Options: LR, SVM, MLP, RF, GB", font=("Arial", 15)).pack(pady=(0,10))
 
     # ---------- Functions for the buttons in the menu -----------
-    # Gotten from LibEMG Menu.py 
+    # Sourced from LibEMG Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git
+    def launch_training(self):
+        self.window.destroy()
+        if self.regression_selected():
+            args = {'media_folder': 'animation/', 'data_folder': Path('data', 'regression').absolute().as_posix()}#, 'rep_time': 50} 
+        else:
+            args = {'media_folder': 'media/images/', 'data_folder': Path('data', 'classification').absolute().as_posix()}
+        
+        training_ui = GUI(self.odh, args=args, width=1000, height=1000, gesture_height=700, gesture_width=700)
+        #training_ui.download_gestures([1,2,3,6,7], "media/images/") # Downloading gestures from github repo. Videos for simultaneous gestures are located in images_master/videos
+        self.create_animation(transition_duration=1, hold_duration=2, rest_duration=3) # Create animations for the intended motions used in the training prompt.
+        training_ui.start_gui()
+        self.initialize_ui()
+    
+    def adjust_param_callback(self):
+        self.window.destroy()
+        if self.regression_selected(): # Trenger vel i utgpkt ikke disse, da de ikke brukes i ML_GUI? -> TODO: burde hente de i ML_GUI 
+            data_folder = Path('data', 'regression').absolute().as_posix()
+        else:
+            data_folder = Path('data', 'classification').absolute().as_posix()
+        params = {'window_size':150, 'window_increment':50, 'deadband': 0., 'thr_angle_mf1': 45, 'thr_angle_mf2': 45, 'gain_mf1': 1, 'gain_mf2': 1} #deafult values for the parameters. 
+        adjust_param_ui = ParameterAdjustmentGUI(online_data_handler=self.odh, regression_selected=self.regression_selected(), model_str=self.model_str.get(), axis_media=self.axis_media, params=params, training_data_folder=data_folder, feature_list=self.feature_list)
+        adjust_param_ui.start_gui()
+        self.initialize_ui() # When the user is done adjusting parameters, the GUI will be closed and the main menu will be re-opened.
+    
+    # NOTE! Do this later
+    def run_prosthesis(self): #NOTE! Take a look if you want this here or in parameter adjustment
+        pass
+    #     self.set_up_model()
+    #     self.window.destroy()
+    #     if self.regression_selected(): 
+    #         controller = RegressorController(ip=self.controller_IP, port=self.controller_PORT)
+    #     else:
+    #         controller = ClassifierController(ip=self.controller_IP, port=self.controller_PORT, output_format=self.predictor.output_format, num_classes=5) # NOTE! num_classes hardcoded -> get from config
+    
+    #     prosthesis = Prosthesis()
+    #     prosthesis.connect("COM3", baudrate=115200)
+    #     actuator_function = ActuatorFunctionSelector(prosthesis=prosthesis, controller=controller)
+    #     motor_setpoints = actuator_function.get_motor_setpoints()
+    #     if motor_setpoints is not None:
+    #         prosthesis.send_command(motor_setpoints)
+
+    # Sourced from LibEMG Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git
     def start_test(self):
         self.window.destroy()
         self.set_up_model()
         if self.regression_selected():
-            controller = RegressorController()
+            controller = RegressorController(ip=self.controller_IP, port=self.controller_PORT) 
             save_file = Path('results', self.model_str.get() + '_reg' + ".pkl").absolute().as_posix()
         else:
-            controller = ClassifierController(output_format=self.model.output_format, num_classes=5) # get num_classes from config
+            controller = ClassifierController(ip=self.controller_IP, port=self.controller_PORT, output_format=self.predictor.output_format, num_classes=5) # NOTE! num_classes hardcoded -> get from config
             save_file = Path('results', self.model_str.get() + '_clf' + ".pkl").absolute().as_posix()
         
         config = FittsConfig(num_trials=16, save_file=save_file)
         ISOFitts(controller, config).run()
         # Its important to stop the model after the game has ended
         # Otherwise it will continuously run in a seperate process
-        self.model.stop_running()
+        self.predictor.stop_running()
         self.initialize_ui()
 
-    def launch_training(self):
-        self.window.destroy()
-        if self.regression_selected():
-            args = {'media_folder': 'animation/', 'data_folder': Path('data', 'regression').absolute().as_posix(), 'rep_time': 50} # CHANGED 22.04. DON'T KNOW IF IT IS BEST TO HAVE SELF.ARGS OR ARGS
-        else:
-            args = {'media_folder': 'media/images/', 'data_folder': Path('data', 'classification').absolute().as_posix()}
-        
-        training_ui = GUI(self.odh, args=args, width=1000, height=1000, gesture_height=700, gesture_width=700)
-        training_ui.download_gestures([1,2,3,4,5], "media/images/") # Downloading gestures from github repo. Videos for simultaneous gestures are located in images_master/videos
-        self.create_animation() # Create animations for the motor functions used in the training protocol.
-        training_ui.start_gui()
-        self.initialize_ui()
-
-    def configure_model_callback(self):
-        self.window.destroy()
-        if self.regression_selected(): # Trenger vel i utgpkt ikke disse, da de ikke brukes i ML_GUI? -> TODO: burde hente de i ML_GUI 
-            data_folder = Path('data', 'regression').absolute().as_posix()
-        else:
-            data_folder = Path('data', 'classification').absolute().as_posix()
-        args = {'window_size':150, 'window_increment':50, 'deadband': 0.1, 'thr_angle_mf1': 45, 'thr_angle_mf2': 45, 'gain_mf1': 1, 'gain_mf2': 1}
-        model_ui = ParameterAdjustmentGUI(online_data_handler=self.odh, regression_selected=self.regression_selected(), model_str=self.model_str.get(), axis_media=self.axis_media, args=args, training_data_folder=data_folder)
-        model_ui.start_gui()
-        self.initialize_ui()
     
-    def run_prosthesis(self):
-        self.set_up_model()
-        self.window.destroy()
-        if self.regression_selected(): 
-            controller = RegressorController(port=5005)
-        else:
-            controller = ClassifierController(output_format=self.model.output_format, num_classes=5)
-    
-        prosthesis = Prosthesis()
-        prosthesis.connect("COM3", baudrate=115200)
-        actuator_function = ActuatorFunctionSelection(prosthesis=prosthesis, controller=controller)
-        motor_setpoints = actuator_function.get_motor_setpoints()
-        if motor_setpoints is not None:
-            prosthesis.send_command(motor_setpoints)
-
-
     # --------- Helper functions for the buttons in the menu -----------
     def _create_default_model_config(self, config_file_path):
         """Creates a default model configuration and saves it to a JSON file."""
@@ -301,22 +309,22 @@ class ProsthesisControlGUI:
         if self.regression_selected():
             emg_model = EMGRegressor(model=model)
             emg_model.fit(feature_dictionary=data_set)
-            emg_model.add_deadband(DEADBAND) # Add a deadband to the regression model. Value below this threshold will be considered 0.
-            self.model = OnlineEMGRegressor(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, self.odh, self.feature_list, std_out=True)
+            #emg_model.add_deadband(DEADBAND) # Add a deadband to the regression model. Value below this threshold will be considered 0.
+            self.predictor = OnlineEMGRegressor(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, self.odh, self.feature_list, std_out=True)
         else:
             emg_model = EMGClassifier(model=model)
             emg_model.fit(feature_dictionary=data_set)
             emg_model.add_velocity(train_windows, train_metadata[labels_key])
-            self.model = OnlineEMGClassifier(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, self.odh, self.feature_list, output_format='probabilities', std_out=True)
+            self.predictor = OnlineEMGClassifier(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, self.odh, self.feature_list, output_format='probabilities', std_out=True)
 
         # Step 5: Create online EMG model and start predicting.
         print('Model fitted and running!')
-        self.model.run(block=False) # block set to false so it will run in a seperate process.
+        self.predictor.run(block=False) # block set to false so it will run in a seperate process.
 
 
-    def create_animation(self):
+    def create_animation(self, transition_duration=1, hold_duration=2, rest_duration=3):
         """Creates animations for different motor functions used in the training protocol."""
-        for mf, (x_factor, y_factor) in self.motor_functions.items():
+        for mf, (x_factor, y_factor) in self.motor_functions.items(): # Now all movements are called motor functions, but are in fact only two motor functions and two combined movements.
             output_filepath = Path(f'animation/collection_{mf}.mp4').absolute()
             if output_filepath.exists():
                 print(f'Animation file for {mf} already exists. Skipping creation.')
@@ -324,7 +332,7 @@ class ProsthesisControlGUI:
 
             # Generate base movement
             #base_motion = self._generate_base_signal()
-            base_motion = self.generate_trapezoid_signal(sampling_rate=24, transition_duration=0.5, hold_duration=1, rest_duration=2) # 24 fps, 0.5s transition, 1s hold, 2s rest
+            base_motion = self._generate_trapezoid_signal(sampling_rate=24, transition_duration=transition_duration, hold_duration=hold_duration, rest_duration=rest_duration)
             # Apply movement transformation
             x_coords = x_factor * base_motion
             y_coords = y_factor * base_motion
@@ -336,15 +344,17 @@ class ProsthesisControlGUI:
             #coordinates = np.hstack((x_coords, y_coords, angles))  
             coordinates = np.stack((x_coords, y_coords), axis=1)
 
+            #plotter = PredictionPlotter(self.axis_media_paths, real_time=False)
+            #plotter.make_animation(coordinates, output_filepath=output_filepath.as_posix())
             
             #animator = MediaGridAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_media_paths=self.axis_media_paths, figsize=(10,10), normalize_distance=True, show_boundary=True, tpd=2)#, plot_line=True) # plot_line does not work
             #animator.plot_center_icon(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, xlabel='MF 1', ylabel='MF 2')
-            scatter_animator_x = ScatterPlotAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_images=self.axis_media, figsize=(10,10), normalize_distance=True, show_boundary=True, tpd=2)#, plot_line=True) # plot_line does not work
+            scatter_animator_x = ScatterPlotAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_images=self.axis_media, figsize=(10,10), normalize_distance=True, show_boundary=True)# ,(tpd=5 this does not make any diffrence..)#, plot_line=True) # plot_line does not work
             scatter_animator_x.save_plot_video(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, verbose=True)
             #arrow_animator = ArrowPlotAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_images=self.axis_media, figsize=(10,10), normalize_distance=True, show_boundary=True, tpd=2)#, plot_line=True) # plot_line does not work
             #arrow_animator.save_plot_video(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, verbose=True)
 
-    def generate_trapezoid_signal(self, sampling_rate, transition_duration, hold_duration, rest_duration):
+    def _generate_trapezoid_signal(self, sampling_rate, transition_duration, hold_duration, rest_duration):
         """ Generate a trapezoidal base signal: 0 -> 1 -> hold -> -1 -> hold -> 0 """
         num_transition = max(1, int(transition_duration * sampling_rate))
         num_hold = max(1, int(hold_duration * sampling_rate))

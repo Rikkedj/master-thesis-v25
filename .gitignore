@@ -19,8 +19,8 @@ __pycache__/
 .venv/
 venv/
 venv311/
+venv-331/
 
 # Ignore pyenv and pipenv virtual environments
 .python-version
-Pipfile.lock
 Pipfile
