@@ -11,6 +11,7 @@ from matplotlib.widgets import Button, Slider
 import numpy as np
 import threading
 from multiprocessing import Process, Queue, Manager
+from multiprocessing.queues import Empty
 from matplotlib.animation import FuncAnimation
 from matplotlib.figure import Figure
 from functools import partial
@@ -21,18 +22,20 @@ import matplotlib.gridspec as gridspec
 import matplotlib.image as mpimg
 import re
 import warnings
+import inspect
 
 from libemg.data_handler import OnlineDataHandler, OfflineDataHandler, RegexFilter, FilePackager
 from libemg.feature_extractor import FeatureExtractor
 from libemg.emg_predictor import OnlineEMGClassifier, EMGClassifier, EMGRegressor, OnlineEMGRegressor
 from libemg.environments.controllers import ClassifierController, RegressorController
-# Local imports
-from controller import Prosthesis, ProsthesisController
+from libemg.prosthesis import Prosthesis, MotorFunctionSelector
 
+from filters import FlutterRejectionFilter # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.
 # Class made by me
 class ParameterAdjustmentPanel:
     '''
     The Model Configuration Panel for configuring the machine learning model. 
+    
     Parameters
     ----------
     window_size: int, default=150
@@ -67,6 +70,8 @@ class ParameterAdjustmentPanel:
                  training_data_folder='./data/',
                  gui=None):
         
+        self.motor_selector = MotorFunctionSelector() # Create the prosthesis controller object
+        
         self.window_increment = window_increment
         self.window_size = window_size
         self.deadband = deadband
@@ -79,25 +84,26 @@ class ParameterAdjustmentPanel:
         # Manager for multiprocessing - so that we can handle interactive inputs from GUI
         manager = Manager()
         self.configuration = manager.dict({
-            "__mc_deadband": self.deadband,
-            "__mc_thr_angle_mf1": self.thr_angle_mf1,
-            "__mc_thr_angle_mf2": self.thr_angle_mf2,
-            "__mc_gain_mf1": self.gain_mf1,
-            "__mc_gain_mf2": self.gain_mf2,
-            "__mc_window_size": self.window_size,
-            "__mc_window_increment": self.window_increment,
+            "deadband": self.deadband,
+            "thr_angle_mf1": self.thr_angle_mf1,
+            "thr_angle_mf2": self.thr_angle_mf2,
+            "gain_mf1": self.gain_mf1,
+            "gain_mf2": self.gain_mf2,
+            "window_size": self.window_size,
+            "window_increment": self.window_increment,
             "running": False
         })
-        self.model = None
+        # Predictor (classifier or regressor) and queue for predictions for passing via multiprocesses and threads
+        self.predictor = None
         self.prediction_queue = Queue()
+        
         self.plot_process = None
-        self.prosthesis_controller = ProsthesisController() # Create the prosthesis controller object
         
         # Communication with the controller
         self.UDP_IP = "127.0.0.1"
         self.UDP_PORT = 5005
 
-        self.widget_tags = {"configuration": ['__mc_configuration_window', '__mc_deadband', '__mc_thr_angle_mf1', '__mc_thr_angle_mf2', '__mc_gain_mf1', '__mc_gain_mf2', '__mc_window_size', '__mc_window_increment', 'save_config_tag']}                           
+        self.widget_tags = {"configuration": ['__mc_configuration_window', 'deadband', 'thr_angle_mf1', 'thr_angle_mf2', 'gain_mf1', 'gain_mf2', 'window_size', 'window_increment', 'save_config_tag']}                           
                
 
     def cleanup_window(self, window_name): # Don't really know what this does
@@ -109,10 +115,10 @@ class ParameterAdjustmentPanel:
     def spawn_configuration_window(self):
         self.cleanup_window("configuration")
         with dpg.window(tag="__mc_configuration_window",
-                        label="Model Configuration",
+                        label="Parameter Adjustments",
                         width=900,
                         height=480):
-            dpg.add_text(label="Model Configuration")
+            dpg.add_text(label="Parameter Adjustements", color=(255, 255, 255), bullet=True)
 
             with dpg.table(header_row=False, resizable=True, policy=dpg.mvTable_SizingStretchProp,
                    borders_outerH=True, borders_innerV=True, borders_innerH=True, borders_outerV=True):
@@ -126,7 +132,7 @@ class ParameterAdjustmentPanel:
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Window Size: ")
                         dpg.add_input_int(default_value=self.window_size, 
-                                            tag="__mc_window_size",
+                                            tag="window_size",
                                             width=100, 
                                             callback=self.update_value_callback
                                         )                   
@@ -134,7 +140,7 @@ class ParameterAdjustmentPanel:
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Window Increment: ")
                         dpg.add_input_int(default_value=self.window_increment,
-                                            tag="__mc_window_increment",
+                                            tag="window_increment",
                                             width=100,
                                             callback=self.update_value_callback # Give another callback, that gets settings, updates plot and updates model
                                         )
@@ -149,7 +155,7 @@ class ParameterAdjustmentPanel:
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Deadband (%): ")
                         dpg.add_input_float(default_value=self.deadband, 
-                                            tag="__mc_deadband",
+                                            tag="deadband",
                                             width=100,
                                             min_value=0,
                                             max_value=0.4,
@@ -161,7 +167,7 @@ class ParameterAdjustmentPanel:
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Threshold angle mf1 (degrees): ")
                         dpg.add_input_int(default_value=self.thr_angle_mf1,
-                                            tag="__mc_thr_angle_mf1",
+                                            tag="thr_angle_mf1",
                                             width=100,
                                             min_value=0,
                                             max_value=45,
@@ -172,7 +178,7 @@ class ParameterAdjustmentPanel:
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Threshold angle mf2 (degrees): ")
                         dpg.add_input_int(default_value=self.thr_angle_mf2,
-                                            tag="__mc_thr_angle_mf2",
+                                            tag="thr_angle_mf2",
                                             width=100,
                                             min_value=0,
                                             max_value=45,
@@ -184,7 +190,7 @@ class ParameterAdjustmentPanel:
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Gain mf1: ")
                         dpg.add_input_float(default_value=self.gain_mf1,
-                                            tag="__mc_gain_mf1",
+                                            tag="gain_mf1",
                                             width=100,
                                             min_value=0.5,
                                             max_value=3,
@@ -195,7 +201,7 @@ class ParameterAdjustmentPanel:
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Gain mf2: ")
                         dpg.add_input_float(default_value=self.gain_mf2,
-                                            tag="__mc_gain_mf2",
+                                            tag="gain_mf2",
                                             width=100,
                                             min_value=0.5,
                                             max_value=3,
@@ -225,16 +231,114 @@ class ParameterAdjustmentPanel:
                 with dpg.table_row():
                     dpg.add_button(label="Visualize Prediction", callback=self.prediction_btn_callback)
                     dpg.add_button(label="Visualize Raw EMG", callback=self.plot_raw_data_callback)
-                    #dpg.add_button(label="Save Configuration", callback=self.save_configuration)
-
+                with dpg.table_row():
+                    dpg.add_button(label="Run Prosthesis", callback=self.run_prosthesis_callback)
+                    dpg.add_button(label="Stop Prosthesis", callback=self.stop_prosthesis_callback)
+    
+    #--------------- Button callbacks ---------------------#
     def update_value_callback(self, sender, app_data):
         '''Updates the configuration dictionary with the new values from the GUI.'''
         self.configuration[sender] = app_data
+        # Get the parameter names for set_configuration (excluding 'self')
+        #sig = inspect.signature(self.motor_selector.set_configuration)
+        #valid_params = set(sig.parameters.keys()) - {'self'}
+        # Filter out invalid keys
+        #filtered_config = {k: v for k, v in self.configuration.items() if k in valid_params}
+
+        #self.motor_selector.set_configuration(**filtered_config) # Set the configuration in the prosthesis controller
         print(self.configuration)
 
+    def reset_model_callback(self):
+        #stop plotting with controller, reset controller or something
+        #self.configuration["running"] = False
+        self.stop_prediction_plot()
+        self.stop_controller()
+        if self.predictor is not None: self.predictor.stop_running()
+        self.get_settings()
+        self.set_up_model()
+        self.predictor.run(block=False)
+        ("Model reset. Press Visualize Prediction to start again.")
+        self.spawn_configuration_window()
+
+    def prediction_btn_callback(self):
+        if not (self.gui.online_data_handler and sum(list(self.gui.online_data_handler.get_data()[1].values()))):
+            raise ConnectionError('Attempted to start data collection, but data are not being received. Please ensure the OnlineDataHandler is receiving data.')
+        
+        if self.predictor is None:
+            self.get_settings()
+            self.set_up_model() # Could combine this with start_estimation, i.e. running in there
+            # TODO: Confirm if reset() is necessary here
+            #self.gui.online_data_handler.reset() 
+        
+        self.predictor.run(block=False)
+        self.configuration["running"] = True
+        
+        self.run_controller()
+        self.start_prediction_plot()       
+
+        self.cleanup_window("configuration")
+
+        self.spawn_configuration_window()
+
+    def run_prosthesis_callback(self):
+        # Set up model and start the predictor
+        if self.predictor is None:
+            self.get_settings()
+            self.set_up_model()
+        self.predictor.run(block=False) # Start the predictor in a separate thread
+        self.configuration["running"] = True
+        # Start the controller thread (if not already running)
+        self.run_controller()
+        # Create prothesis object and connect to it 
+        self.prosthesis = Prosthesis()
+        self.prosthesis.connect(port="COM9", baudrate=115200, timeout=0) # Change this to the correct port and baudrate for your prosthesis
+        # Set thresholds to the motor function selector
+        self.motor_selector.set_parameters(
+            thr_angle_mf1=self.configuration["thr_angle_mf1"], 
+            thr_angle_mf2=self.configuration["thr_angle_mf2"]
+            )  
+        
+        # Start background thread for sending commands to the prosthesis
+        self.prosthesis_thread = threading.Thread(target=self._send_command_to_prosthesis, daemon=True)
+        self.prosthesis_thread.start()
+
+    def _send_command_to_prosthesis(self):
+        """
+        This function runs in a separate thread. It gets the predictions from the prediction queue and sends them to the prosthesis.
+        """
+        while self.configuration["running"]:
+            latest_pred = None  
+            # Flush the queue to get only the latest prediction
+            while not self.prediction_queue.empty():
+                try:
+                    latest_pred = self.prediction_queue.get_nowait()
+                except Empty:
+                    break
+            #if not pred_queue.empty():
+            if latest_pred is not None:
+                motor_setpoint =  self.motor_selector.get_motor_setpoints(latest_pred) # Get the motor setpoints from the motor function selector
+                self.prosthesis.send_command(motor_setpoint)
+            time.sleep(0.5) # Adjust sending rate
+
+
+    def stop_prosthesis_callback(self):
+        self.configuration["running"] = False
+        if hasattr(self, "prosthesis_thread") and self.prosthesis_thread.is_alive():
+            self.prosthesis_thread.join()
+
+        if hasattr(self, "prosthesis"):
+            self.prosthesis.disconnect() # Disconnect the prosthesis
+        print("STop controller thread in stop prosthesis")
+        self.stop_controller()
+
+    ## Callbacks for plotting raw EMG - from LibEMG
+    def plot_raw_data_callback(self):
+        self.visualization_thread = threading.Thread(target=self._run_visualization_helper)
+        self.visualization_thread.start()
+
+    #--------------- File save dialog callback ---------------------#
     def save_config_callback(self, sender, app_data):
-        """Opens the file save dialog."""
-        # Show the pre-defined file dialog
+        """Opens the pre-defined file save dialog."""
         dpg.show_item('save_config_tag')
 
     def _handle_save_dialog_callback(self, sender, app_data):
@@ -265,8 +369,8 @@ class ParameterAdjustmentPanel:
             # Ensure parent directory exists
             file_path.parent.mkdir(parents=True, exist_ok=True)
             self.get_settings() # Get the settings from the GUI
-            self.prosthesis_controller.set_configuration(gain_mf1=self.gain_mf1, gain_mf2=self.gain_mf2, thr_angle_mf1=self.thr_angle_mf1, thr_angle_mf2=self.thr_angle_mf2,deadband=self.deadband) # Set the configuration in the prosthesis controller
-            self.prosthesis_controller.write_to_json(file_path) # Save the configuration to a file
+            self.motor_selector.set_configuration(gain_mf1=self.gain_mf1, gain_mf2=self.gain_mf2, thr_angle_mf1=self.thr_angle_mf1, thr_angle_mf2=self.thr_angle_mf2,deadband=self.deadband) # Set the configuration in the prosthesis controller
+            self.motor_selector.write_to_json(file_path) # Save the configuration to a file
             # Convert Manager.dict proxy to a standard dict 
             # config_to_save = dict(self.configuration)
             # with open(file_path, 'w') as f:
@@ -275,101 +379,73 @@ class ParameterAdjustmentPanel:
         except Exception as e:
             print(f"Error saving configuration: {e}")
 
-
-    def reset_model_callback(self):
-        #stop plotting with controller, reset controller or something
-        #self.configuration["running"] = False
-        self.stop_prediction_plot()
-        self.stop_controller()
-        if self.model is not None: self.model.stop_running()
-        self.get_settings()
-        self.set_up_model()
-        self.model.run(block=False)
-        ("Model reset. Press Visualize Prediction to start again.")
-        self.spawn_configuration_window()
-
-
+    # -------------- Helper functions for the callbacks ---------------------#
     def get_settings(self):
-        self.deadband = float(dpg.get_value(item="__mc_deadband"))
-        self.gain_mf1 = float(dpg.get_value(item="__mc_gain_mf1"))
-        self.gain_mf2 = float(dpg.get_value(item="__mc_gain_mf2"))
-        self.thr_angle_mf1 = int(dpg.get_value(item="__mc_thr_angle_mf1"))
-        self.thr_angle_mf2 = int(dpg.get_value(item="__mc_thr_angle_mf2"))
-        self.window_size = int(dpg.get_value(item="__mc_window_size"))
-        self.window_increment = int(dpg.get_value(item="__mc_window_increment"))
+        self.deadband = float(dpg.get_value(item="deadband"))
+        self.gain_mf1 = float(dpg.get_value(item="gain_mf1"))
+        self.gain_mf2 = float(dpg.get_value(item="gain_mf2"))
+        self.thr_angle_mf1 = int(dpg.get_value(item="thr_angle_mf1"))
+        self.thr_angle_mf2 = int(dpg.get_value(item="thr_angle_mf2"))
+        self.window_size = int(dpg.get_value(item="window_size"))
+        self.window_increment = int(dpg.get_value(item="window_increment"))
         print("Settings updated")
 
     def stop_controller(self):
-        self.controller = None
         if self.controller_thread and self.controller_thread.is_alive():
             self.controller_thread.join(timeout=1)
             print("Controller thread terminated")
             self.controller_thread = None
+        self.controller = None
 
     def start_prediction_plot(self):
         if self.plot_process and self.plot_process.is_alive(): # Does this in the stop-function as well, so might be redundant
             self.stop_prediction_plot()
 
-        self.configuration["running"] = True
+        #self.configuration["running"] = True #NOTE: This should be called something else, and is not even in the initialization?? TODO: Check this out
         plotter = PredictionPlotter(self.gui.axis_media) #self.gui.axis_images
         self.plot_process = Process(target=plotter.run, args=(self.configuration,self.prediction_queue)) #self.plot_process = Process(target=self.plotter, args=(self.configuration, self.prediction_queue))
         self.plot_process.start()
 
-    def _plot_helper(self, config, queue):
-        plotter = PredictionPlotter()
-        plotter.run(config, queue)
-
     def stop_prediction_plot(self):
         if self.plot_process and self.plot_process.is_alive():
-            self.configuration["running"] = False
+            self.configuration["running"] = False #NOTE: This should be called something else, and is not even in the initialization?? TODO: Check this out
             self.plot_process.join(timeout=1)
-            if self.plot_process.is_alive():
+            if self.plot_process.is_alive(): # If the process is still alive after join, terminate it
                 self.plot_process.terminate()
                 self.plot_process.join()
             print("Plot process terminated")
-            self.plot_process = None
-
-    def prediction_btn_callback(self):
-        if not (self.gui.online_data_handler and sum(list(self.gui.online_data_handler.get_data()[1].values()))):
-            raise ConnectionError('Attempted to start data collection, but data are not being received. Please ensure the OnlineDataHandler is receiving data.')
-        
-        if self.model is None:
-            self.get_settings()
-            self.set_up_model() # Could combine this with start_estimation, i.e. running in there
-            #self.gui.online_data_handler.reset() # Litt usikker på om denne fungerer, eller om den trengs
-            self.model.run(block=False)
-
-        self.configuration["running"] = True
-        
-        self.run_controller()
-        self.start_prediction_plot()       
-
-        self.cleanup_window("configuration")
-
-        self.spawn_configuration_window()
-        
+            self.plot_process = None    
 
     def run_controller(self):
-        self.controller_thread = threading.Thread(target=self._run_controller_helper)
+        print("Starting controller thread")
+        self.controller_thread = threading.Thread(target=self._run_controller_helper,)
         self.controller_thread.start()
-        self.controller_thread.join(timeout=1)
+        #self.controller_thread.join(timeout=1)
 
     def _run_controller_helper(self):
+        """
+        This function runs in a separate thread. It gets the predictions from the predictor model and puts them in a queue for the plotter to use.
+        """
         if self.gui.regression_selected:
             self.controller = RegressorController(ip=self.UDP_IP, port=self.UDP_PORT)
         else:
             self.controller = ClassifierController(output_format='predictions', ip=self.UDP_IP, port=self.UDP_PORT)
         
-        while self.configuration["running"]:
+
+        self.flutter_filter = FlutterRejectionFilter(k=5.0) # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.            
+        while self.configuration["running"]: #NOTE: This should be called something else, and is not even in the initialization?? TODO: Check this out
             pred = self.controller.get_data(["predictions"])
             if pred is not None: 
-                #print("In controller: ", pred)
-                self.prediction_queue.put(pred)
-                time.sleep(0.1) # Maybe not a good idea, but not to overload the system
+                #filtered_pred = self.flutter_filter.filter(pred) # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.
+                self.flutter_filter.update_deadband_radius(self.configuration["deadband"])
+                self.flutter_filter.update_gain(self.configuration["gain_mf1"])
+                filtered_pred = self.flutter_filter.apply(pred)
+                print("Filtered prediction: ", filtered_pred)
+                self.prediction_queue.put(filtered_pred)
+                #time.sleep(0.1) # Maybe not a good idea, but not to overload the system
 
-        self.controller = None
+        self.controller = None # Reset controller when done running
                 
-
     
     def set_up_model(self):
         # Step 1: Parse offline training data
@@ -413,7 +489,7 @@ class ParameterAdjustmentPanel:
         if self.gui.regression_selected:
             regex_filters = [
                 RegexFilter(left_bound = "regression/C_", right_bound="_R", values = [str(i) for i in range(num_motions)], description='classes'),
-                RegexFilter(left_bound = "R_", right_bound="_emg.csv", values = [str(i) for i in range(num_reps)], description='reps')
+                RegexFilter(left_bound = "R_", right_bound="_emg.csv", values = [str(i) for i in range(num_reps)], description='reps') # TODO! Add a way to remove the discard the first rep
             ]
             metadata_fetchers = [
                 FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map) ) #package_function=lambda x, y: True)
@@ -428,24 +504,7 @@ class ParameterAdjustmentPanel:
             metadata_fetchers = None
             labels_key = 'classes'
             metadata_operations = None
-        # if self.gui.regression_selected:
-        #     regex_filters = [
-        #         RegexFilter(left_bound='regression/C_0_R_', right_bound='_emg.csv', values=['0'], description='reps') # reps are hard-coded, find a way to make it dynamic
-        #     ]
-        #     metadata_fetchers = [
-        #         FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=['collection'], description='labels'), package_function=lambda x, y: True)
-        #     ]
-        #     labels_key = 'labels'
-        #     metadata_operations = {'labels': 'last_sample'}
-        # else:
-        #     regex_filters = [
-        #         RegexFilter(left_bound = "classification/C_", right_bound="_R", values = ["0","1","2","3","4"], description='classes'),
-        #         RegexFilter(left_bound = "R_", right_bound="_emg.csv", values = ["0", "1", "2"], description='reps'),
-        #     ]
-        #     metadata_fetchers = None
-        #     labels_key = 'classes'
-        #     metadata_operations = None
-
+        
         offline_dh = OfflineDataHandler()
         offline_dh.get_data('./', regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
         train_windows, train_metadata = offline_dh.parse_windows(self.window_size, self.window_increment, metadata_operations=metadata_operations)
@@ -453,7 +512,11 @@ class ParameterAdjustmentPanel:
         # Step 2: Extract features from offline data
         fe = FeatureExtractor()
         print("Extracting features")
-        feature_list = fe.get_feature_groups()['HTD'] # Make this chosen from the GUI later
+        if self.gui.feature_list is not None:
+            feature_list = self.gui.feature_list
+        else: 
+            feature_list = fe.get_feature_groups()['HTD']
+        
         training_features = fe.extract_features(feature_list, train_windows, array=True)
 
         # Step 3: Dataset creation
@@ -462,8 +525,7 @@ class ParameterAdjustmentPanel:
         data_set['training_features'] = training_features
         data_set['training_labels'] = train_metadata[labels_key]
 
-        # Step 4: Create the EMG model
-        
+        # Step 4: Create and fit the prediction model
         self.gui.online_data_handler.prepare_smm()
         model = self.gui.model_str
         print('Fitting model...')
@@ -473,24 +535,18 @@ class ParameterAdjustmentPanel:
             emg_model.fit(feature_dictionary=data_set)
             # consider adding a threshold angle here, or just do this when setting up the controller
             #emg_model.add_deadband(self.deadband) # Add a deadband to the regression model. Value below this threshold will be considered 0.
-            self.model = OnlineEMGRegressor(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, feature_list, ip=self.UDP_IP, port=self.UDP_PORT, std_out=True)
+            self.predictor = OnlineEMGRegressor(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, feature_list, ip=self.UDP_IP, port=self.UDP_PORT, std_out=False)
         else:
             # Classification
             emg_model = EMGClassifier(model=model)
             emg_model.fit(feature_dictionary=data_set)
             emg_model.add_velocity(train_windows, train_metadata[labels_key])
-            self.model = OnlineEMGClassifier(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, feature_list, output_format='probabilities', ip=self.UDP_IP, port=self.UDP_PORT)
+            self.predictor = OnlineEMGClassifier(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, feature_list, output_format='probabilities', ip=self.UDP_IP, port=self.UDP_PORT)
 
         # Step 5: Create online EMG model and start predicting.
-        print('Model fitted and running!')
-        #self.model.run(block=False) # block set to false so it will run in a seperate process.
+        print('Model fitted!')
     
     
-    ## Callbacks for plotting raw EMG - from LibEMG
-    def plot_raw_data_callback(self):
-        self.visualization_thread = threading.Thread(target=self._run_visualization_helper)
-        self.visualization_thread.start()
- 
     def _run_visualization_helper(self):
         self.gui.online_data_handler.visualize(block=False)
 
@@ -613,7 +669,7 @@ class PredictionPlotter:
         self.ax_main.set_xlabel("MF 1")
         self.ax_main.set_ylabel("MF 2")
         self.ax_main.grid(True)
-        self.ax_main.axis('equal') # Ensure aspect ratio is equal
+        
         # # Create subplots in the grid
         # self.ax_main = self.fig.add_subplot(gs[1, 1])   # Main (center)
         # self.ax_north = self.fig.add_subplot(gs[0, 1])  # North (top center)
@@ -629,7 +685,7 @@ class PredictionPlotter:
         self.current_plot, = self.ax_main.plot([], [], 'o', color='red', markersize=8, markeredgecolor='black', label='Current Prediction')
         
         # Create a circle for the deadband
-        self.circle = plt.Circle((0, 0), config["__mc_deadband"], color='r', fill=False, linestyle='dashed')
+        self.circle = plt.Circle((0, 0), config["deadband"], color='r', fill=False, linestyle='dashed')
         self.ax_main.add_patch(self.circle)
         # Threshold lines
         self.threshold_lines = [
@@ -693,14 +749,15 @@ class PredictionPlotter:
 
         self.ax_main.set_xlim(center_x - plot_range, center_x + plot_range)
         self.ax_main.set_ylim(center_y - plot_range, center_y + plot_range)
+        #self.ax_main.set_aspect('equal', adjustable='box') # Keep the aspect ratio equal
     
     def _draw_threshold(self, config):
-        thresh_rad_x = np.deg2rad(config["__mc_thr_angle_mf1"])
-        x_vals = np.array([-1.5, 1.5])
+        thresh_rad_x = np.deg2rad(config["thr_angle_mf1"])
+        x_vals = np.array([-1.5, 1.5]) # TODO: Make range dynamic or something
         y_vals1, y_vals2 = np.tan(thresh_rad_x) * x_vals, -np.tan(thresh_rad_x) * x_vals
         
-        thresh_rad_y = np.deg2rad(config["__mc_thr_angle_mf2"])
-        y_vals = np.array([-1.5, 1.5])
+        thresh_rad_y = np.deg2rad(config["thr_angle_mf2"])
+        y_vals = np.array([-1.5, 1.5]) # TODO: Make range dynamic or something
         x_vals1, x_vals2 = np.tan(thresh_rad_y) * y_vals, -np.tan(thresh_rad_y) * y_vals
         
         self.threshold_lines[0].set_data(x_vals, y_vals1)
@@ -710,15 +767,24 @@ class PredictionPlotter:
     
     def _draw_deadband(self, config):
         ''' Updates the deadband circle, given as percent of the range of the data. '''
-        self.circle.set_radius(config["__mc_deadband"] * self._calculate_range())
+        self.circle.set_radius(config["deadband"] * self._calculate_range())
     
-    def _draw_prediction(self, config, pred_queue):
-        if not pred_queue.empty():
-            pred = pred_queue.get()
-            pred[0] *= config["__mc_gain_mf1"]
-            pred[1] *= config["__mc_gain_mf2"]
-            self.history.append(pred.copy())
-            self.tale.append(pred.copy())
+    def _draw_prediction(self, pred_queue):
+        latest_pred = None
+        # Flush the queue to get only the latest prediction
+        while not pred_queue.empty():
+            try:
+                latest_pred = pred_queue.get_nowait()
+            except Empty:
+                break
+        #if not pred_queue.empty():
+        if latest_pred is not None:
+            #pred = pred_queue.get()
+            print("In plotter, pred: ", latest_pred)
+            #pred[0] *= config["gain_mf1"] This is now done before putting in the queue
+            #pred[1] *= config["gain_mf2"]
+            self.history.append(latest_pred.copy())
+            self.tale.append(latest_pred.copy())
             self.tale = self.tale[-5:]
             tale_array = np.array(self.tale)
             
@@ -760,7 +826,7 @@ class PredictionPlotter:
 
         self._draw_threshold(config=config)
         self._draw_deadband(config=config)
-        self._draw_prediction(config=config, pred_queue=pred_queue)
+        self._draw_prediction(pred_queue=pred_queue)
         self._update_plot_limits()
         self._update_media_frames()
 

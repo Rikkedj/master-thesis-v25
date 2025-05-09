@@ -6,7 +6,9 @@ import serial
 import time
 import json
 
-class Prosthesis:
+
+# This code is part of the libemg library, this one is not used
+class Prosthesis_NOTUSED:
     """
     Class for communicating with prosthetic device.
     """
@@ -77,7 +79,7 @@ class Prosthesis:
         return self.connection is not None and self.connection.is_open
     
 
-class ProsthesisController: # Made a specific controller-class for the prosthesis, try making it more modular
+class MotorFunctionSelector_NOTUSED: # Made a specific controller-class for the prosthesis, try making it more modular
     """
     Class for controlling the prosthetic device using EMG signals. Call it something else, like ActuatorFunctionSelector?
     """
@@ -168,17 +170,17 @@ class ProsthesisController: # Made a specific controller-class for the prosthesi
         
 
 
-if __name__ == "__main__":
+#if __name__ == "__main__":
     # Example usage
-    prosthesis = Prosthesis()
-    prosthesis.connect("COM3")
+    # prosthesis = Prosthesis()
+    # prosthesis.connect("COM3")
     
-    controller = RegressorController(ip='127.0.0.1', port=5005)
-    prost_controller = ProsthesisController(prosthesis=prosthesis, controller=controller)
-    prost_controller.get_num_motor_functions()
-    prost_controller.set_configuration(gain_mf1=1.5, gain_mf2=2.0, thr_angle_mf1=0.6, thr_angle_mf2=0.7, deadband=0.05)
-    prost_controller.write_to_json("config.json")
+    # controller = RegressorController(ip='127.0.0.1', port=5005)
+    # prost_controller = ProsthesisController(prosthesis=prosthesis, controller=controller)
+    # prost_controller.get_num_motor_functions()
+    # prost_controller.set_configuration(gain_mf1=1.5, gain_mf2=2.0, thr_angle_mf1=0.6, thr_angle_mf2=0.7, deadband=0.05)
+    # prost_controller.write_to_json("config.json")
     
-    # Disconnect when done
-    prosthesis.disconnect()
+    # # Disconnect when done
+    # prosthesis.disconnect()
     # Note: The above code is a simplified example. In a real-world scenario, you would need to handle exceptions and errors more robustly.
