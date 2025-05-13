@@ -15,8 +15,6 @@ from libemg.feature_extractor import FeatureExtractor
 from libemg.emg_predictor import OnlineEMGClassifier, EMGClassifier, EMGRegressor, OnlineEMGRegressor
 from libemg.environments.controllers import ClassifierController, RegressorController
 from libemg.environments.fitts import ISOFitts, FittsConfig
-from libemg.prosthesis import Prosthesis, MotorFunctionSelector
-
 from parameterGUI import ParameterAdjustmentGUI
 from plotter import PredictionPlotter
 
@@ -25,7 +23,7 @@ class ProsthesisControlGUI:
     Class for a Simultaneous Proportional Prosthesis control system. Inspired by the Menu class in Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git.
     """
     def __init__(self):
-        streamer, sm = delsys_streamer(channel_list=[0,2,5,8]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
+        streamer, sm = delsys_streamer(channel_list=[4,6,9,13]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
         # Create online data handler to listen for the data
         self.odh = OnlineDataHandler(sm)
         # Learning model
@@ -40,10 +38,11 @@ class ProsthesisControlGUI:
         # Initialize motor functions for the training protocol
         #TODO: Consider taking only motor function as input, and give option if user wants combined movement training.
         self.motor_functions = {
-            'hand_open_close': (1, 0),          # Movement along x-axis
-            'pronation_supination': (0, 1),     # Movement along y-axis
-            'diagonal_1': (1, 1)*1/np.sqrt(2),               # Diagonal movement (↗)
-            'diagonal_2': (1, -1)*1/np.sqrt(2),              # Diagonal movement (↘)
+            'hand_open': (1, 0),            # Movement along x-axis
+            'hand_close': (-1, 0),          # Movement along x-axis
+            'pronation': (0, 1),            # Movement along y-axis
+            'supination': (0, -1),          # Movement along y-axis
+            'rest': (0, 0)                  # Rest position
         }
         # TODO: Add images the simultanous gestures
         self.axis_media = {
@@ -122,24 +121,32 @@ class ProsthesisControlGUI:
     def launch_training(self):
         self.window.destroy()
         if self.regression_selected():
-            args = {'media_folder': 'animation/', 'data_folder': Path('data', 'regression').absolute().as_posix()}#, 'rep_time': 50} 
+            args = {'media_folder': 'animation/', 'data_folder': Path('data', 'regression').absolute().as_posix(), 'rest_time': 3} 
         else:
             args = {'media_folder': 'media/images/', 'data_folder': Path('data', 'classification').absolute().as_posix()}
         
         training_ui = GUI(self.odh, args=args, width=1000, height=1000, gesture_height=700, gesture_width=700)
         #training_ui.download_gestures([1,2,3,6,7], "media/images/") # Downloading gestures from github repo. Videos for simultaneous gestures are located in images_master/videos
-        self.create_animation(transition_duration=1, hold_duration=2, rest_duration=3) # Create animations for the intended motions used in the training prompt.
+        self.create_animation(transition_duration=2, hold_duration=2, rest_duration=0) # Create animations for the intended motions used in the training prompt.
         training_ui.start_gui()
         self.initialize_ui()
     
     def adjust_param_callback(self):
         self.window.destroy()
         if self.regression_selected(): # Trenger vel i utgpkt ikke disse, da de ikke brukes i ML_GUI? -> TODO: burde hente de i ML_GUI 
-            data_folder = Path('data', 'regression').absolute().as_posix()
+            #data_folder = Path('data', 'regression').absolute().as_posix()
+            data_folder = Path('data', 'regression',).as_posix()
         else:
             data_folder = Path('data', 'classification').absolute().as_posix()
         params = {'window_size':150, 'window_increment':50, 'deadband': 0., 'thr_angle_mf1': 45, 'thr_angle_mf2': 45, 'gain_mf1': 1, 'gain_mf2': 1} #deafult values for the parameters. 
-        adjust_param_ui = ParameterAdjustmentGUI(online_data_handler=self.odh, regression_selected=self.regression_selected(), model_str=self.model_str.get(), axis_media=self.axis_media, params=params, training_data_folder=data_folder, feature_list=self.feature_list)
+        adjust_param_ui = ParameterAdjustmentGUI(online_data_handler=self.odh, 
+                                                 regression_selected=self.regression_selected(), 
+                                                 model_str=self.model_str.get(), 
+                                                 axis_media=self.axis_media, 
+                                                 params=params, 
+                                                 training_data_folder=data_folder, 
+                                                 feature_list=self.feature_list, 
+                                                 debug=True)
         adjust_param_ui.start_gui()
         self.initialize_ui() # When the user is done adjusting parameters, the GUI will be closed and the main menu will be re-opened.
     
@@ -225,7 +232,6 @@ class ProsthesisControlGUI:
         # Use the configuration to set up the model
         WINDOW_SIZE = model_config['window_size']
         WINDOW_INCREMENT = model_config['window_increment']
-        DEADBAND = model_config['deadband']
 
         # Set the data folder based on the model type
         if self.regression_selected():
@@ -322,8 +328,19 @@ class ProsthesisControlGUI:
         self.predictor.run(block=False) # block set to false so it will run in a seperate process.
 
 
-    def create_animation(self, transition_duration=1, hold_duration=2, rest_duration=3):
-        """Creates animations for different motor functions used in the training protocol."""
+    def create_animation(self, transition_duration=1, hold_duration=2, rest_duration=0):
+        """
+        Creates animations for different motor functions used in the training protocol.
+        Parameters:
+        ----------
+        transition_duration : float
+            Duration of the transition phase from origin to endpoint of motion (in seconds).
+        hold_duration : float
+            Duration of the hold phase at the endpoint of motion (in seconds).
+        rest_duration : float
+            Duration of the rest phase after each motion (in seconds).
+        """
+        fps = 24  # Frames per second for the animation
         for mf, (x_factor, y_factor) in self.motor_functions.items(): # Now all movements are called motor functions, but are in fact only two motor functions and two combined movements.
             output_filepath = Path(f'animation/collection_{mf}.mp4').absolute()
             if output_filepath.exists():
@@ -332,7 +349,14 @@ class ProsthesisControlGUI:
 
             # Generate base movement
             #base_motion = self._generate_base_signal()
-            base_motion = self._generate_trapezoid_signal(sampling_rate=24, transition_duration=transition_duration, hold_duration=hold_duration, rest_duration=rest_duration)
+            #base_motion = self._generate_trapezoid_signal(sampling_rate=24, transition_duration=transition_duration, hold_duration=hold_duration, rest_duration=rest_duration)
+            base_motion = self._generate_sawtooth_signal(rise_time=transition_duration, 
+                                                         hold_time= hold_duration, 
+                                                         rest_time=rest_duration, 
+                                                         n_repeats=1, 
+                                                         sampling_rate=fps, 
+                                                         amplitude=1
+                                                         ) # 1 second rise time, 3 seconds rest time, 1 repeat, 24 fps
             # Apply movement transformation
             x_coords = x_factor * base_motion
             y_coords = y_factor * base_motion
@@ -349,11 +373,61 @@ class ProsthesisControlGUI:
             
             #animator = MediaGridAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_media_paths=self.axis_media_paths, figsize=(10,10), normalize_distance=True, show_boundary=True, tpd=2)#, plot_line=True) # plot_line does not work
             #animator.plot_center_icon(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, xlabel='MF 1', ylabel='MF 2')
-            scatter_animator_x = ScatterPlotAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_images=self.axis_media, figsize=(10,10), normalize_distance=True, show_boundary=True)# ,(tpd=5 this does not make any diffrence..)#, plot_line=True) # plot_line does not work
+            scatter_animator_x = ScatterPlotAnimator(output_filepath=output_filepath.as_posix(),
+                                                    show_direction=True, 
+                                                    show_countdown=True, 
+                                                    axis_images=self.axis_media, 
+                                                    figsize=(10,10), 
+                                                    normalize_distance=False, 
+                                                    show_boundary=True, 
+                                                    fps=fps
+                                                    )# ,(tpd=5 this does not make any diffrence..)#, plot_line=True) # plot_line does not work
             scatter_animator_x.save_plot_video(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, verbose=True)
             #arrow_animator = ArrowPlotAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_images=self.axis_media, figsize=(10,10), normalize_distance=True, show_boundary=True, tpd=2)#, plot_line=True) # plot_line does not work
             #arrow_animator.save_plot_video(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, verbose=True)
 
+    def _generate_sawtooth_signal(self, rise_time, hold_time, rest_time, n_repeats, sampling_rate, amplitude=1):
+        """
+        Generate a sawtooth signal that rises linearly over 'rise_time' seconds, then rests flat for 'rest_time' seconds.
+
+        Parameters
+        ----------
+        rise_time : float
+            Duration of the rising edge (in seconds).
+        rest_time : float
+            Duration of the rest period after each rise (in seconds).
+        n_repeats : int
+            Number of sawtooth cycles to generate.
+        sampling_rate : int
+            Samples per second (Hz).
+        amplitude : float
+            Peak value of the signal.
+
+        Returns
+        -------
+        signal : np.ndarray
+            The generated sawtooth signal.
+        time_vec : np.ndarray
+            Corresponding time vector in seconds.
+        """
+        # Number of samples for rise and rest
+        rise_samples = int(rise_time * sampling_rate)
+        hold_samples = int(hold_time * sampling_rate)
+        rest_samples = int(rest_time * sampling_rate)
+
+        # Create one cycle: rise + rest
+        rise_part = np.linspace(0, amplitude, rise_samples, endpoint=False)
+        hold_part = np.full(hold_samples, amplitude)
+        rest_part = np.zeros(rest_samples)
+
+        # One full cycle
+        cycle = np.concatenate([rise_part, hold_part, rest_part])
+
+        # Repeat the cycle
+        signal = np.tile(cycle, n_repeats)
+
+        return signal
+    
     def _generate_trapezoid_signal(self, sampling_rate, transition_duration, hold_duration, rest_duration):
         """ Generate a trapezoidal base signal: 0 -> 1 -> hold -> -1 -> hold -> 0 """
         num_transition = max(1, int(transition_duration * sampling_rate))

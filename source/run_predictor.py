@@ -39,7 +39,7 @@ def _match_metadata_to_data(metadata_file: str, data_file: str, class_map: dict)
 
 if __name__ == '__main__':
     # need to have the same amount of channels that you had when training the model
-    _, sm = delsys_streamer(channel_list=[1,2,5,9]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
+    _, sm = delsys_streamer(channel_list=[2,4,5,9]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
     odh = OnlineDataHandler(sm) # Offline datahandler on shared memory
     
     ############ Set up regressor ########
@@ -90,7 +90,7 @@ if __name__ == '__main__':
     emg_model.fit(feature_dictionary=data_set)
     regressor = OnlineEMGRegressor(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, odh, feature_list, ip= UDP_IP, port= UDP_PORT, std_out=True)
     regressor.run(block=False) # block set to false so it will run in a seperate process.
-    regressor.visualize(50)
+    #regressor.visualize(50)
 
     #regressor.visualize_motor_functions(deadband_threshold=o_regressor.deadband_threshold, threshold_angle=30)
     
