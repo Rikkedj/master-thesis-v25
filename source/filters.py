@@ -85,10 +85,10 @@ class FlutterRejectionFilter:
         """
         # Apply the deadband first
         x = np.array(x)
-        x_deadbanded = self.apply_deadband(x)
+        #x_deadbanded = self.apply_deadband(x)
 
         # Nonlinear tanh function for flutter rejection
-        y = np.abs(x_deadbanded) * np.tanh(self.k * x_deadbanded)
+        y = np.abs(x) * np.tanh(self.k * x)
         y_gained = y * self.gain
 
         # Apply the integrator

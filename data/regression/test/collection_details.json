@@ -1,0 +1,1 @@
+{"num_motions": 5, "num_reps": 3, "classes": ["collection_hand_close", "collection_hand_open", "collection_pronation", "collection_rest", "collection_supination"], "class_map": {"0": "collection_hand_close", "1": "collection_hand_open", "2": "collection_pronation", "3": "collection_rest", "4": "collection_supination"}, "time": "2025-05-12T17:35:00.670455"}

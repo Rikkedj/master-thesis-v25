@@ -66,7 +66,7 @@ class ParameterAdjustmentGUI:
         self.axis_media = axis_media
         self.model_str = model_str
         self.params = params
-        self.regression_selected = regression_selected # Bool that tells if the regression model is selected, gotten from function in TrainingProtocol
+        self.regression_selected = regression_selected # Bool that tells if the regression model is selected
         self.training_data_folder = training_data_folder
         self.feature_list = feature_list 
         
@@ -82,7 +82,7 @@ class ParameterAdjustmentGUI:
 
     def _window_init(self, width, height, debug=False):
         dpg.create_context()
-        dpg.create_viewport(title="Configure Machine Learning Model",
+        dpg.create_viewport(title="Adjust Post-Training Parameters",
                             width=width,
                             height=height)
         dpg.setup_dearpygui()
@@ -112,7 +112,7 @@ class ParameterAdjustmentGUI:
                 
             with dpg.menu(label="Model"):
                 dpg.add_menu_item(label="Adjust Parameters", callback=self._adjust_param_callback, show=True)
-        self._adjust_param_callback()
+        #self._adjust_param_callback()
                 
     def _adjust_param_callback(self):
         panel_arguments = list(inspect.signature(ParameterAdjustmentPanel.__init__).parameters) 

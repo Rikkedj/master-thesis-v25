@@ -3,7 +3,10 @@ from libemg.streamers import delsys_streamer
 from libemg.data_handler import OnlineDataHandler, OfflineDataHandler, RegexFilter, FilePackager
 from libemg.feature_extractor import FeatureExtractor
 from libemg.emg_predictor import EMGRegressor, OnlineEMGRegressor
+from libemg.offline_metrics import OfflineMetrics
 import re, json, os
+import numpy as np
+import matplotlib.pyplot as plt
 
 def _match_metadata_to_data(metadata_file: str, data_file: str, class_map: dict) -> bool:
             """
@@ -41,10 +44,10 @@ if __name__ == '__main__':
     
     ############ Set up regressor ########
     # Step 2.1: Parse offline training data
-    WINDOW_SIZE = 150
-    WINDOW_INCREMENT = 100
+    WINDOW_SIZE = 100
+    WINDOW_INCREMENT = 50
 
-    data_folder = "data/regression/04-01/"
+    data_folder = "data/regression/"
     json_path = os.path.join(data_folder, "collection_details.json")
 
     with open(json_path, 'r') as f:
@@ -70,22 +73,30 @@ if __name__ == '__main__':
         )
     ]
     metadata_fetchers = [
-        FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map) ) #package_function=lambda x, y: True)
+        FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map)) 
     ]
     labels_key = 'labels'
     metadata_operations = {'labels': 'last_sample'}
 
     offline_dh = OfflineDataHandler()
     offline_dh.get_data('./', regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
-    offline_dh.visualize()
+    #offline_dh.visualize()
     
-    train_windows, train_metadata = offline_dh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
-
+    train_odh= offline_dh.isolate_data("reps", [0,1,2])
+    test_odh = offline_dh.isolate_data("reps", [3,4])
+    train_windows, train_metadata = train_odh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
+    test_windows, test_metadata = test_odh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
     # Step 2: Extract features from offline data
     fe = FeatureExtractor()
     print("Extracting features")
-    feature_list = fe.get_feature_groups()['HTD'] # Make this chosen from the GUI later
+    feature_list = fe.get_feature_list()
+    desired_features = ["MAV", "ZC", "WL", "MYOP"]
+    feature_list = [f for f in feature_list if f in desired_features]
+    #feature_list = fe.get_feature_groups()['HTD'] # Make this chosen from the GUI later
+    
     training_features = fe.extract_features(feature_list, train_windows, array=True)
+    test_features = fe.extract_features(feature_list, test_windows, array=True)
+    test_labels = test_metadata[labels_key]
 
     # Step 3: Dataset creation
     data_set = {}
@@ -95,9 +106,29 @@ if __name__ == '__main__':
 
     # Step 4: Create the EMG model
     
-    model = 'LR' # Make this chosen from the GUI later
-    print('Fitting model...')
+    models = ['LR', 'SVM', 'RF'] # Make this chosen from the GUI later
+    results = {metric: [] for metric in ['R2', 'NRMSE', 'MAE']}
+    om = OfflineMetrics()
 
-    emg_model = EMGRegressor(model=model)
-    emg_model.fit(feature_dictionary=data_set)
-    
+    for model in models:
+        print(f"Running {model} model")
+        emg_model = EMGRegressor(model=model)
+        emg_model.fit(feature_dictionary=data_set)
+        preds = emg_model.run(test_features)
+
+        # Extract metrics for each classifier
+        metrics = om.extract_offline_metrics(results.keys(), test_labels, preds)
+        for metric in metrics:
+            results[metric].append(metrics[metric].mean())
+        #emg_model.visualize(test_labels=test_labels, predictions=preds)
+        print('Plotting decision stream. This will block the main thread once the plot is shown. Close the plot to continue.') 
+        emg_model.visualize(test_labels=test_labels, predictions=preds)
+
+    plt.style.use('ggplot')
+    fig, axs = plt.subplots(ncols=len(results), layout='constrained', figsize=(10, 5))
+    for metric, ax in zip(results.keys(), axs):
+        ax.bar(models, np.array(results[metric]) * 100, width=0.2)
+        ax.set_ylabel(f"{metric} (%)")
+
+    fig.suptitle('Metrics Summary')
+    plt.show()

@@ -366,10 +366,12 @@ class PredictionPlotter:
         #         self.video_elements[location].update() # Update the video frame
 
 
-    def _update_main_plot(self, config, pred_queue):
+    def _update_prediction_plot(self, config, pred_queue):
         self._draw_threshold(config=config)
         self._draw_deadband(config=config)
         self._draw_prediction(config=config, pred_queue=pred_queue)
+
+    #def _update_target_plot(self):
 
     def update(self, frame, config, pred_queue):
         if not config["running"]:
@@ -379,8 +381,10 @@ class PredictionPlotter:
             self.close() # Release resources
             # plt.close(self.fig) # Closing handled in self.close()
             return [] # Return empty list of artists
-        
-        self._update_main_plot(config=config, pred_queue=pred_queue)
+        if self.real_time_prediction:
+            self._update_prediction_plot(config=config, pred_queue=pred_queue)
+        else:
+            self._update_target_plot()
         #self._update_plot_limits()
         self._update_media_frames()
 

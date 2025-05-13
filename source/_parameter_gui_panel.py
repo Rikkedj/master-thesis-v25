@@ -82,7 +82,7 @@ class ParameterAdjustmentPanel:
         self.gui = gui
         self.training_data_folder = training_data_folder
         # Manager for multiprocessing - so that we can handle interactive inputs from GUI
-        manager = Manager()
+        manager = Manager() # This is what takes much time when initiating
         self.configuration = manager.dict({
             "deadband": self.deadband,
             "thr_angle_mf1": self.thr_angle_mf1,
@@ -291,7 +291,7 @@ class ParameterAdjustmentPanel:
         self.run_controller()
         # Create prothesis object and connect to it 
         self.prosthesis = Prosthesis()
-        self.prosthesis.connect(port="COM9", baudrate=115200, timeout=0) # Change this to the correct port and baudrate for your prosthesis
+        self.prosthesis.connect(port="COM9", baudrate=115200, timeout=1) # Change this to the correct port and baudrate for your prosthesis
         # Set thresholds to the motor function selector
         self.motor_selector.set_parameters(
             thr_angle_mf1=self.configuration["thr_angle_mf1"], 
@@ -488,7 +488,7 @@ class ParameterAdjustmentPanel:
         
         if self.gui.regression_selected:
             regex_filters = [
-                RegexFilter(left_bound = "regression/C_", right_bound="_R", values = [str(i) for i in range(num_motions)], description='classes'),
+                RegexFilter(left_bound = f"{self.training_data_folder}/C_", right_bound="_R", values = [str(i) for i in range(num_motions)], description='classes'),
                 RegexFilter(left_bound = "R_", right_bound="_emg.csv", values = [str(i) for i in range(num_reps)], description='reps') # TODO! Add a way to remove the discard the first rep
             ]
             metadata_fetchers = [
