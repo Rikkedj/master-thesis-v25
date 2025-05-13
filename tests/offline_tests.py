@@ -44,8 +44,8 @@ if __name__ == '__main__':
     
     ############ Set up regressor ########
     # Step 2.1: Parse offline training data
-    WINDOW_SIZE = 100
-    WINDOW_INCREMENT = 50
+    WINDOW_SIZE = 200       # 100 ms * 2000Hz = 200 samples
+    WINDOW_INCREMENT = 100   # 50 ms * 2000Hz = 10 samples
 
     data_folder = "data/regression/"
     json_path = os.path.join(data_folder, "collection_details.json")
@@ -84,6 +84,7 @@ if __name__ == '__main__':
     
     train_odh= offline_dh.isolate_data("reps", [0,1,2])
     test_odh = offline_dh.isolate_data("reps", [3,4])
+    test_odh.visualize(block=False)
     train_windows, train_metadata = train_odh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
     test_windows, test_metadata = test_odh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
     # Step 2: Extract features from offline data
@@ -106,7 +107,7 @@ if __name__ == '__main__':
 
     # Step 4: Create the EMG model
     
-    models = ['LR', 'SVM', 'RF'] # Make this chosen from the GUI later
+    models = ['LR', 'SVM', 'RF', 'GB', 'MLP'] # Make this chosen from the GUI later
     results = {metric: [] for metric in ['R2', 'NRMSE', 'MAE']}
     om = OfflineMetrics()
 
