@@ -55,8 +55,8 @@ class ParameterAdjustmentGUI:
                  training_data_folder = './data/', 
                  feature_list=None,
                  regression_selected=False,
-                 width=1700,
-                 height=1080,
+                 width=1100,
+                 height=900,
                  debug=False, # Not shure if this is necessary
                  clean_up_on_kill=False):
         
@@ -82,7 +82,7 @@ class ParameterAdjustmentGUI:
 
     def _window_init(self, width, height, debug=False):
         dpg.create_context()
-        dpg.create_viewport(title="Adjust Post-Training Parameters",
+        dpg.create_viewport(title="Post-Training Adjustment GUI",
                             width=width,
                             height=height)
         dpg.setup_dearpygui()
@@ -112,7 +112,8 @@ class ParameterAdjustmentGUI:
                 
             with dpg.menu(label="Model"):
                 dpg.add_menu_item(label="Adjust Parameters", callback=self._adjust_param_callback, show=True)
-        #self._adjust_param_callback()
+        
+        self._adjust_param_callback()
                 
     def _adjust_param_callback(self):
         panel_arguments = list(inspect.signature(ParameterAdjustmentPanel.__init__).parameters) 

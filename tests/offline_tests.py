@@ -2,7 +2,7 @@
 from libemg.streamers import delsys_streamer 
 from libemg.data_handler import OnlineDataHandler, OfflineDataHandler, RegexFilter, FilePackager
 from libemg.feature_extractor import FeatureExtractor
-from libemg.emg_predictor import EMGRegressor, OnlineEMGRegressor
+from libemg.emg_predictor import EMGRegressor, OnlineEMGRegressor, EMGClassifier
 from libemg.offline_metrics import OfflineMetrics
 import re, json, os
 import numpy as np
@@ -46,9 +46,15 @@ if __name__ == '__main__':
     # Step 2.1: Parse offline training data
     WINDOW_SIZE = 200       # 100 ms * 2000Hz = 200 samples
     WINDOW_INCREMENT = 100   # 50 ms * 2000Hz = 10 samples
+    regression_selected = True
 
-    data_folder = "data/regression/"
-    json_path = os.path.join(data_folder, "collection_details.json")
+    if regression_selected:
+        data_folder = "data/regression/"
+    else:
+        data_folder = "data/classification/"
+
+    data_folder = "data/regression/19-05-new/"
+    json_path = os.path.join('./', data_folder, "collection_details.json")
 
     with open(json_path, 'r') as f:
         collection_details = json.load(f)
@@ -59,41 +65,50 @@ if __name__ == '__main__':
     class_map = collection_details['class_map']
     
     regex_filters = [
-        RegexFilter(
-            left_bound = os.path.join(data_folder, "C_"),
-            right_bound = "_R",
-            values = [str(i) for i in range(num_motions)],
-            description = 'classes'
-        ),
-        RegexFilter(
-            left_bound = "R_", 
-            right_bound="_emg.csv", 
-            values = [str(i) for i in range(num_reps)], 
-            description='reps'
-        )
-    ]
-    metadata_fetchers = [
-        FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map)) 
-    ]
-    labels_key = 'labels'
-    metadata_operations = {'labels': 'last_sample'}
-
+            RegexFilter(
+                left_bound = os.path.join(data_folder, "C_"),
+                right_bound = "_R",
+                values = [str(i) for i in range(num_motions)],
+                description = 'classes'
+            ),
+            RegexFilter(
+                left_bound = "R_", 
+                right_bound="_emg.csv", 
+                values = [str(i) for i in range(num_reps)], 
+                description='reps'
+            )
+        ]
+    if regression_selected:
+        metadata_fetchers = [
+            FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map)) 
+        ]
+        labels_key = 'labels'
+        metadata_operations = {'labels': 'last_sample'}
+    else:
+        metadata_fetchers = None
+        labels_key = 'classes'
+        metadata_operations = None
+         
     offline_dh = OfflineDataHandler()
-    offline_dh.get_data('./', regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
-    #offline_dh.visualize()
+    offline_dh.get_data('./',regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
+    #offline_dh.visualize()    offline_dh_c = OfflineDataHandler()
+    odh_ex_rest = offline_dh.isolate_data("classes", [0,1,2,4])
+
     
-    train_odh= offline_dh.isolate_data("reps", [0,1,2])
-    test_odh = offline_dh.isolate_data("reps", [3,4])
-    test_odh.visualize(block=False)
+    #train_odh= offline_dh.isolate_data("reps", [0,1,2])
+    #test_odh = offline_dh.isolate_data("reps", [3,4])
+    train_odh = odh_ex_rest.isolate_data("reps", [0,1,2])
+    test_odh = odh_ex_rest.isolate_data("reps", [3,4])
+    #test_odh.visualize(block=False)
     train_windows, train_metadata = train_odh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
     test_windows, test_metadata = test_odh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
     # Step 2: Extract features from offline data
     fe = FeatureExtractor()
     print("Extracting features")
     feature_list = fe.get_feature_list()
-    desired_features = ["MAV", "ZC", "WL", "MYOP"]
-    feature_list = [f for f in feature_list if f in desired_features]
-    #feature_list = fe.get_feature_groups()['HTD'] # Make this chosen from the GUI later
+    #desired_features = ["MAV", "ZC", "WL", "MYOP"] # The same used in Fougner 2012
+    #feature_list = [f for f in feature_list if f in desired_features]
+    feature_list = fe.get_feature_groups()['HTD'] # Make this chosen from the GUI later
     
     training_features = fe.extract_features(feature_list, train_windows, array=True)
     test_features = fe.extract_features(feature_list, test_windows, array=True)
@@ -105,31 +120,82 @@ if __name__ == '__main__':
     data_set['training_features'] = training_features
     data_set['training_labels'] = train_metadata[labels_key]
 
-    # Step 4: Create the EMG model
+
+    if regression_selected:
+        ######## REGRESSOR ########
+        # Step 4.2: Create the Regressor model
+        models = ['LR', 'SVM', 'RF', 'GB', 'MLP'] # Make this chosen from the GUI later
+        results = {metric: [] for metric in ['R2', 'NRMSE', 'MAE']}
+        om = OfflineMetrics()
+        for model in models:
+            print(f"Running {model} model")
+            emg_model = EMGRegressor(model=model)
+            #emg_model.add_deadband(threshold=0.3)
+            emg_model.fit(feature_dictionary=data_set)
+            preds = emg_model.run(test_features)
+
+            # Extract metrics for each classifier
+            metrics = om.extract_offline_metrics(results.keys(), test_labels, preds)
+            for metric in metrics:
+                results[metric].append(metrics[metric].mean())
+                
+            print('Plotting decision stream. This will block the main thread once the plot is shown. Close the plot to continue.') 
+           # emg_model.visualize(test_labels=test_labels, predictions=preds, save_path=f"./plots/19-05/ML-results/HTDfeatures/{model}_offline_decision_stream.png", save_plot=True)
+
+        plt.style.use('ggplot')
+        fig, axs = plt.subplots(ncols=len(results), layout='constrained', figsize=(10, 5))
+        for metric, ax in zip(results.keys(), axs):
+            print(f"Result for  metric {metric}:", results[metric])
+            ax.bar(models, np.array(results[metric]) * 100, width=0.2)
+            ax.set_ylabel(f"{metric} (%)")
+
+        fig.suptitle('Metrics Summary')
+        fig.savefig(f"./plots/19-05/ML-results/HTDfeatures/metrics_summary.png")
+        plt.show()
+    else:
+        ######## CLASSIFIER ########    
+        models = ['LDA', 'SVM', 'RF']
+        results = {metric: [] for metric in ['CA', 'AER', 'F1', 'PREC', 'RECALL','CONF_MAT']} 
+        om = OfflineMetrics()
+        for model in models:
+            print(f"Running {model} model")
+            emg_model = EMGClassifier(model=model)
+            emg_model.fit(feature_dictionary=data_set)
+            preds, probs = emg_model.run(test_features)
+            # Extract metrics for each classifier
+            metrics = om.extract_offline_metrics(results.keys(), test_labels, preds, null_label=2) # null-label is for AER, represent the No Movement (rest) class
+            for metric in metrics:
+                if metric == 'CONF_MAT':
+                    # Plot confusion matrix separately
+                    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+                    labels = [f"{i} - {motion_names[i]}" for i in range(num_motions)]
+                    cm = confusion_matrix(test_labels, preds, labels=None, normalize='pred')
+                    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
+                    disp.plot(xticks_rotation=45)
+                    disp.ax_.set_title(f"Confusion Matrix - {model}")
+                    plt.savefig(f"./plots/14-05/classification/classifier-training-protocol/confusion_matrix_{model}.png", bbox_inches='tight', dpi=300)
+                    plt.show()
+                results[metric].append(metrics[metric])#.mean())
+            print('Plotting decision stream. This will block the main thread once the plot is shown. Close the plot to continue.') 
+            #emg_model.visualize(test_labels=test_labels, predictions=preds, probabilities=probs, save_path=f"./plots/14-05/classification/classifier-training/{model}_offline_decision_stream.png", save_plot=True)
+
+        plt.style.use('ggplot')
+        fig, axs = plt.subplots(ncols=len(results)-1, layout='constrained', figsize=(10, 5))
+        for metric, ax in zip(results.keys(), axs):
+            if metric == 'CONF_MAT':
+                # Plot confusion matrix separately
+                for mat in results[metric]:
+                    #om.visualize_conf_matrix(mat,labels)
+                    continue
+            else:
+                ax.bar(models, np.array(results[metric]) * 100, width=0.2)
+                ax.set_ylabel(f"{metric} (%)")
+
+        fig.suptitle('Metrics Summary')
+        fig.savefig(f"./plots/14-05/classification/classifier-training-protocol/metrics_summary.png")
+        plt.show()
+
+        om.extract_offline_metrics(['CONF_MAT'],test_labels, preds)
     
-    models = ['LR', 'SVM', 'RF', 'GB', 'MLP'] # Make this chosen from the GUI later
-    results = {metric: [] for metric in ['R2', 'NRMSE', 'MAE']}
-    om = OfflineMetrics()
 
-    for model in models:
-        print(f"Running {model} model")
-        emg_model = EMGRegressor(model=model)
-        emg_model.fit(feature_dictionary=data_set)
-        preds = emg_model.run(test_features)
-
-        # Extract metrics for each classifier
-        metrics = om.extract_offline_metrics(results.keys(), test_labels, preds)
-        for metric in metrics:
-            results[metric].append(metrics[metric].mean())
-        #emg_model.visualize(test_labels=test_labels, predictions=preds)
-        print('Plotting decision stream. This will block the main thread once the plot is shown. Close the plot to continue.') 
-        emg_model.visualize(test_labels=test_labels, predictions=preds)
-
-    plt.style.use('ggplot')
-    fig, axs = plt.subplots(ncols=len(results), layout='constrained', figsize=(10, 5))
-    for metric, ax in zip(results.keys(), axs):
-        ax.bar(models, np.array(results[metric]) * 100, width=0.2)
-        ax.set_ylabel(f"{metric} (%)")
-
-    fig.suptitle('Metrics Summary')
-    plt.show()
+    

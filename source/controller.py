@@ -4,7 +4,8 @@ from libemg.environments.controllers import Controller, RegressorController, Cla
 from libemg.streamers import delsys_streamer
 import serial
 import time
-import json
+import json, os
+from libemg.data_handler import OnlineDataHandler, OfflineDataHandler, RegexFilter, FilePackager
 
 
 # This code is part of the libemg library, this one is not used
@@ -183,4 +184,4 @@ class MotorFunctionSelector_NOTUSED: # Made a specific controller-class for the 
     
     # # Disconnect when done
     # prosthesis.disconnect()
-    # Note: The above code is a simplified example. In a real-world scenario, you would need to handle exceptions and errors more robustly.
+   

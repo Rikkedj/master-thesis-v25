@@ -23,7 +23,7 @@ class ProsthesisControlGUI:
     Class for a Simultaneous Proportional Prosthesis control system. Inspired by the Menu class in Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git.
     """
     def __init__(self):
-        streamer, sm = delsys_streamer(channel_list=[4,6,9,13]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
+        streamer, sm = delsys_streamer(channel_list=[2,5,10,15]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
         # Create online data handler to listen for the data
         self.odh = OnlineDataHandler(sm)
         # Learning model
@@ -125,7 +125,7 @@ class ProsthesisControlGUI:
         else:
             args = {'media_folder': 'media/images/', 'data_folder': Path('data', 'classification').absolute().as_posix()}
         
-        training_ui = GUI(self.odh, args=args, width=1000, height=1000, gesture_height=700, gesture_width=700)
+        training_ui = GUI(self.odh, args=args, width=1100, height=1000, gesture_height=700, gesture_width=700)
         #training_ui.download_gestures([1,2,3,6,7], "media/images/") # Downloading gestures from github repo. Videos for simultaneous gestures are located in images_master/videos
         self.create_animation(transition_duration=2, hold_duration=2, rest_duration=0) # Create animations for the intended motions used in the training prompt.
         training_ui.start_gui()
@@ -138,7 +138,7 @@ class ProsthesisControlGUI:
             data_folder = Path('data', 'regression',).as_posix()
         else:
             data_folder = Path('data', 'classification').absolute().as_posix()
-        params = {'window_size':150, 'window_increment':50, 'deadband': 0., 'thr_angle_mf1': 45, 'thr_angle_mf2': 45, 'gain_mf1': 1, 'gain_mf2': 1} #deafult values for the parameters. 
+        params = {'window_size':200, 'window_increment':100, 'deadband': 0., 'thr_angle_mf1': 45, 'thr_angle_mf2': 45, 'gain_mf1': 1, 'gain_mf2': 1} #deafult values for the parameters. 
         adjust_param_ui = ParameterAdjustmentGUI(online_data_handler=self.odh, 
                                                  regression_selected=self.regression_selected(), 
                                                  model_str=self.model_str.get(), 
@@ -175,7 +175,7 @@ class ProsthesisControlGUI:
             controller = RegressorController(ip=self.controller_IP, port=self.controller_PORT) 
             save_file = Path('results', self.model_str.get() + '_reg' + ".pkl").absolute().as_posix()
         else:
-            controller = ClassifierController(ip=self.controller_IP, port=self.controller_PORT, output_format=self.predictor.output_format, num_classes=5) # NOTE! num_classes hardcoded -> get from config
+            controller = ClassifierController(ip=self.controller_IP, port=self.controller_PORT, output_format=self.predictor.output_format, num_classes=len(self.motor_functions)) # NOTE! num_classes hardcoded -> get from config
             save_file = Path('results', self.model_str.get() + '_clf' + ".pkl").absolute().as_posix()
         
         config = FittsConfig(num_trials=16, save_file=save_file)
@@ -190,8 +190,8 @@ class ProsthesisControlGUI:
     def _create_default_model_config(self, config_file_path):
         """Creates a default model configuration and saves it to a JSON file."""
         default_config = {
-            'window_size': 150,
-            'window_increment': 50,
+            'window_size': 200,
+            'window_increment': 100,
             'deadband': 0.1,
             'thr_angle_mf1': 45,
             'thr_angle_mf2': 45,
@@ -241,7 +241,7 @@ class ProsthesisControlGUI:
 
         # Load and process training data 
         with open(data_folder + '/collection_details.json', 'r') as f:
-            collection_details = json.load(f)
+            self.collection_details = json.load(f)
   
         def _match_metadata_to_data(metadata_file: str, data_file: str, class_map: dict) -> bool:
             """
@@ -272,10 +272,10 @@ class ProsthesisControlGUI:
 
             return metadata_file == expected_metadata_file
         
-        num_motions = collection_details['num_motions']
-        num_reps = collection_details['num_reps']
-        motion_names = collection_details['classes']
-        class_map = collection_details['class_map']
+        num_motions = self.collection_details['num_motions']
+        num_reps = self.collection_details['num_reps']
+        motion_names = self.collection_details['classes']
+        class_map = self.collection_details['class_map']
         
         # The same regexfilter for both classification and regression since data-folder is changed further up. 
         regex_filters = [
