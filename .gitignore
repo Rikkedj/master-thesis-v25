@@ -5,6 +5,9 @@
 animation/
 animation_assets/
 media/
+data/
+plots/
+test-data/
 
 # Ignore Python cache files
 __pycache__/

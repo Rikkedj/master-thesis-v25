@@ -507,11 +507,11 @@ class ParameterAdjustmentPanel:
             pred = self.controller.get_data(["predictions"])
             if pred is not None: 
                 #filtered_pred = self.flutter_filter.filter(pred) # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.
-                filtered_pred = self.flutter_filter.update(pred)
+                filtered_pred = self.flutter_filter.filter(pred) # Filter prediction to reject fluttering
                 #print("Filtered prediction: ", filtered_pred)
-                pred_feedback = pred - filtered_pred
+                pred_feedback = pred - filtered_pred # Feedback after removing the filtered prediction
                 #print("Pred after flutter filter: ", pred_new)
-                pred_controlled = self.pred_controller.update_prediction(pred_feedback)
+                pred_controlled = self.pred_controller.update_prediction(pred_feedback) # Apply gain and deadband to the prediction
                 #print("Pred after post prediction controller: ", pred_new)
                 self.prediction_queue.put(pred_controlled)
                 #time.sleep(0.1) # Maybe not a good idea, but not to overload the system

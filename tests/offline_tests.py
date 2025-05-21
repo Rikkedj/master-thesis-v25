@@ -7,6 +7,60 @@ from libemg.offline_metrics import OfflineMetrics
 import re, json, os
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
+from pathlib import Path
+
+class FlutterRejectionFilter:
+    """
+    From source.controller.py
+    """
+    def __init__(self, tanh_gain=0.5, dt=0.01, integrator_enabled=False, gain=1.0, k=0.0):
+        """
+        Nonlinear flutter rejection filter with gain, deadband and optional integrator
+
+        Parameters:
+        -------------
+        tanh_gain : float 
+            The scaling factor for the tanh function. A lower tanh_gain makes the nonlinear filter more linear/gradual.
+        dt : float 
+            The time constant for the integrator (affects smoothness).
+        integrator_enabled : bool
+            If True, the filter will include an integrator to smooth the output.
+        gain : float
+            Gain applied to the output to scale the response.
+        k : float
+            New parameter, doesn't know how it make the system response
+        """
+        self.tanh_gain = tanh_gain
+        self.dt = dt
+        self.integrator_enabled = integrator_enabled
+        self.state = None # Initialize the state for the integrator
+        self.gain = gain
+        self.k = k
+
+
+    ## Updated version of filter
+    def reset_integrator(self):
+        """ Reset the filter state to zero. """
+        if self.state is not None:
+            self.state[:] = 0.0
+
+    def filter(self, x):
+        x = np.asarray(x)
+        if self.state is None:
+            self.state = np.zeros_like(x)
+        print(f"Input: {x}")
+        print(f"State: {self.state}")
+        nonlinear_output = (np.abs(x)-self.k) * np.tanh(self.tanh_gain * x)
+        print(f"Nonlinear Output: {nonlinear_output}")
+        self.state += nonlinear_output * self.dt
+        
+        if self.integrator_enabled:
+            return self.gain*self.state
+        else:
+            return self.gain*nonlinear_output
+        
 
 def _match_metadata_to_data(metadata_file: str, data_file: str, class_map: dict) -> bool:
             """
@@ -120,27 +174,80 @@ if __name__ == '__main__':
     data_set['training_features'] = training_features
     data_set['training_labels'] = train_metadata[labels_key]
 
-
+    filter = FlutterRejectionFilter(tanh_gain=1.5, dt=0.014, integrator_enabled=True, gain=1.1)
+    test_nr = 25
     if regression_selected:
         ######## REGRESSOR ########
         # Step 4.2: Create the Regressor model
-        models = ['LR', 'SVM', 'RF', 'GB', 'MLP'] # Make this chosen from the GUI later
+        models = ['GB'] # Make this chosen from the GUI later 'LR', 'SVM', 'RF', 'GB', 'MLP'
         results = {metric: [] for metric in ['R2', 'NRMSE', 'MAE']}
         om = OfflineMetrics()
         for model in models:
             print(f"Running {model} model")
             emg_model = EMGRegressor(model=model)
+            #emg_model.install_filter(filter) #NOTE"! Made this filter 21.05 but doesn't make sense to do integration on the testdata like this, need to split it
             #emg_model.add_deadband(threshold=0.3)
             emg_model.fit(feature_dictionary=data_set)
             preds = emg_model.run(test_features)
-
+            #filtered_preds = filter.update(preds)
             # Extract metrics for each classifier
             metrics = om.extract_offline_metrics(results.keys(), test_labels, preds)
             for metric in metrics:
                 results[metric].append(metrics[metric].mean())
                 
             print('Plotting decision stream. This will block the main thread once the plot is shown. Close the plot to continue.') 
-           # emg_model.visualize(test_labels=test_labels, predictions=preds, save_path=f"./plots/19-05/ML-results/HTDfeatures/{model}_offline_decision_stream.png", save_plot=True)
+            #emg_model.visualize(test_labels=test_labels, predictions=preds, save_path=f"./plots/21-05/ML-results/HTDfeatures/{model}_offline_decision_stream-filtered-{test_nr}.png", save_plot=True)
+            filtered_preds = []
+            for i in range(test_features.shape[0]):
+                pred = preds[i]
+                pred = filter.filter(pred)
+                filtered_preds.append(pred)
+            filtered_preds = np.array(filtered_preds)
+            metrics = om.extract_offline_metrics(results.keys(), test_labels, filtered_preds)
+            for metric in metrics:
+                results[metric].append(metrics[metric].mean())
+
+            plt.style.use('ggplot')
+            fig, axs = plt.subplots(nrows=test_labels.shape[1], ncols=1, sharex=True, layout='constrained', figsize=(10, 7))
+            fig.suptitle(f'Decision Stream for {model}', x=0.5)
+            fig.supxlabel('Prediction Index')
+            fig.supylabel('Model Output')
+
+            marker_size = 5
+            pred_color = 'black'
+            filtered_pred_color = 'forestgreen'
+            label_color = 'blue'
+            x = np.arange(test_labels.shape[0])
+            handles = [mpatches.Patch(color=label_color, label='True Labels'), 
+                       mlines.Line2D([], [], color=pred_color, marker='o', markersize=marker_size, linestyle='None', label='Predictions'),
+                       mlines.Line2D([], [], color=filtered_pred_color, linestyle='-', label='Filtered Predictions')]
+            for dof_idx, ax in enumerate(axs):
+                if dof_idx == 0:
+                    title = "Hand Open/Close"
+                    ax.text(-0.08, 1, 'Hand Open', va='center', ha='right', transform=ax.get_yaxis_transform(), fontsize=9)
+                    ax.text(-0.08, -1, 'Hand Close', va='center', ha='right', transform=ax.get_yaxis_transform(), fontsize=9)
+                elif dof_idx == 1:
+                    title = "Pronation/Supination"
+                    ax.text(-0.08, 1, 'Pronation', va='center', ha='right', transform=ax.get_yaxis_transform(), fontsize=9)
+                    ax.text(-0.08, -1, 'Supination', va='center', ha='right', transform=ax.get_yaxis_transform(), fontsize=9)
+
+                ax.set_title(f"Motor Function: {title}", fontsize=10)
+                ax.set_ylim((-1.1, 1.1))
+                ax.xaxis.grid(False)
+                ax.fill_between(x, test_labels[:, dof_idx], alpha=0.5, color=label_color)
+                ax.scatter(x, preds[:, dof_idx], color=pred_color, s=marker_size, label='Raw Preds')
+                ax.scatter(x, filtered_preds[:, dof_idx], color=filtered_pred_color, s=marker_size, marker='x', label='Filtered Preds')
+
+            fig.legend(handles=handles,
+                        loc='upper right', 
+                        fontsize=7, 
+                        bbox_to_anchor=(0.9, 1.0))#,   bbox_transform=axs[0].transAxes)
+            save_path = f"./plots/21-05/ML-results/HTDfeatures/{model}_offline_decision_stream-filtered-{test_nr}.png"
+            save_path = Path(save_path)
+            # Ensure save_path exists, creating it if needed
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(save_path, bbox_inches='tight', dpi=300)            
+            plt.show()
 
         plt.style.use('ggplot')
         fig, axs = plt.subplots(ncols=len(results), layout='constrained', figsize=(10, 5))
@@ -149,8 +256,11 @@ if __name__ == '__main__':
             ax.bar(models, np.array(results[metric]) * 100, width=0.2)
             ax.set_ylabel(f"{metric} (%)")
 
+        save_path = f"./plots/21-05/ML-results/HTDfeatures/metrics_summary-filtered-{test_nr}.png"
+        if not os.path.exists(os.path.dirname(save_path)):
+            os.makedirs(os.path.dirname(save_path))
         fig.suptitle('Metrics Summary')
-        fig.savefig(f"./plots/19-05/ML-results/HTDfeatures/metrics_summary.png")
+        fig.savefig(save_path, bbox_inches='tight', dpi=300)
         plt.show()
     else:
         ######## CLASSIFIER ########    

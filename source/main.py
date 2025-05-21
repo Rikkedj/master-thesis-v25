@@ -23,7 +23,7 @@ class ProsthesisControlGUI:
     Class for a Simultaneous Proportional Prosthesis control system. Inspired by the Menu class in Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git.
     """
     def __init__(self):
-        streamer, sm = delsys_streamer(channel_list=[2,5,10,15]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
+        streamer, sm = delsys_streamer(channel_list=[2,4,5,15]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
         # Create online data handler to listen for the data
         self.odh = OnlineDataHandler(sm)
         # Learning model

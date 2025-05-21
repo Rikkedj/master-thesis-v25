@@ -1,7 +1,7 @@
 import numpy as np
 
 class PostPredictionController:
-    def __init__(self, gain_mf1=1.0, gain_mf2=1.0, thr_angle_mf1=45, thr_angle_mf2=45, deadband_radius=0.0):
+    def __init__(self, gain_mf1=1.0, gain_mf2=1.0, thr_angle_mf1=45, thr_angle_mf2=45, deadband_radius=0.0): # TODO: Consider having gain for each motion class, not only motor function
         """
         Post-prediction controller to scale the output of the prediction model.
 
@@ -71,7 +71,7 @@ class PostPredictionController:
         return prediction
 
 class FlutterRejectionFilter:
-    def __init__(self, tanh_gain=0.5, dt=0.01, integrator_enabled=False, gain=1.0):
+    def __init__(self, tanh_gain=0.5, dt=0.01, integrator_enabled=False, gain=1.0, k=0.0):
         """
         Nonlinear flutter rejection filter with gain, deadband and optional integrator
 
@@ -91,6 +91,7 @@ class FlutterRejectionFilter:
         self.integrator_enabled = integrator_enabled
         self.state = None # Initialize the state for the integrator
         self.gain = gain
+        self.k = k
 
 
     ## Updated version of filter
@@ -99,12 +100,12 @@ class FlutterRejectionFilter:
         if self.state is not None:
             self.state[:] = 0.0
 
-    def update(self, x):
+    def filter(self, x):
         x = np.asarray(x)
         if self.state is None:
             self.state = np.zeros_like(x)
 
-        nonlinear_output = np.abs(x) * np.tanh(self.tanh_gain * x)
+        nonlinear_output = (np.abs(x)-self.k) * np.tanh(self.tanh_gain * x)
         self.state += nonlinear_output * self.dt
         
         if self.integrator_enabled:
