@@ -1,5 +1,6 @@
 import dearpygui.dearpygui as dpg
 import json
+import os
 
 from pathlib import Path
 from PIL import Image as PILImage
@@ -88,7 +89,9 @@ class ParameterAdjustmentPanel:
         self.training_data_folder = training_data_folder
         self.training_media_folder = training_media_folder
         self.model_str = gui.model_str # Initial model string, but can be changed in gui
-        self.optional_features = ["MAV", "ZC", "WL", "MYOP"]
+
+        self.optional_features = FeatureExtractor().get_feature_list() #["MAV", "ZC", "WL", "MYOP",]
+        self.optional_feature_groups = [fs for fs in FeatureExtractor().get_feature_groups().keys()] #["Time domain", "Frequency domain", "Time-frequency domain"]
         self.selected_features = {}
         self.model_options = { True: ["LR", "SVM", "MLP", "RF", "GB"],                  # If regression is selected
                                False: ["LDA", "KNN", "SVM", "MLP", "RF", "QDA", "NB"]}  # classification
@@ -177,8 +180,8 @@ class ParameterAdjustmentPanel:
         #### WINDOW FOR MACHINE LEARNING MODEL SETTINGS ############
         with dpg.window(tag="model_adjustment_window",
                         label="ML Model Settings",
-                        width=1000,
-                        height=250,
+                        width=1100,
+                        height=300,
                         pos=(0, 0)):
             #dpg.add_text(label="Model Configuration", color=(255, 255, 255))
             with dpg.table(header_row=False, resizable=True, policy=dpg.mvTable_SizingStretchProp,
@@ -208,7 +211,7 @@ class ParameterAdjustmentPanel:
                         dpg.add_input_int(default_value=self.window_size, 
                                             tag="window_size",
                                             width=100, 
-                                            callback=self.update_value_callback
+                                            callback=self.update_ml_model_callback
                                         )                   
 
                     with dpg.group(horizontal=True):
@@ -216,28 +219,46 @@ class ParameterAdjustmentPanel:
                         dpg.add_input_int(default_value=self.window_increment,
                                             tag="window_increment",
                                             width=200,
-                                            callback=self.update_value_callback # Give another callback, that gets settings, updates plot and updates model
+                                            callback=self.update_ml_model_callback # Give another callback, that gets settings, updates plot and updates model
                                         )
                 with dpg.table_row(): 
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Features: ")
-                        for feature in self.optional_features:
-                            dpg.add_checkbox(label=feature, 
-                                             tag=feature,
-                                             default_value=False,
-                                             callback=self.update_value_callback
-                                            )
-                            self.selected_features[feature] = False
+                        with dpg.child_window(height=50, autosize_x=True, horizontal_scrollbar=True): # Make this a child window to make it scrollable
+                            with dpg.group(horizontal=True):
+                                for feature in self.optional_features:
+                                    dpg.add_checkbox(label=feature,
+                                                    tag=feature,
+                                                    default_value=False,
+                                                    callback=self.update_ml_model_callback)
+                        # for feature in self.optional_features:
+                        #     dpg.add_checkbox(label=feature, 
+                        #                      tag=feature,
+                        #                      default_value=False,
+                        #                      callback=self.update_value_callback
+                        #                     )
+                            #self.selected_features[feature] = False # Initialize selected features
                 
+                    with dpg.group(horizontal=True):
+                        dpg.add_text(default_value="Feature sets: ")
+                        with dpg.child_window(height=50, autosize_x=True, horizontal_scrollbar=True): # Make this a child window to make it scrollable
+                            with dpg.group(horizontal=True):
+                                for fg in self.optional_feature_groups:
+                                    dpg.add_checkbox(label=fg,
+                                                    tag=f"fg_{fg}",
+                                                    default_value=False,
+                                                    callback=self.update_ml_model_callback
+                                                    )
+                    
                 with dpg.table_row():
-                    with dpg.group(horizontal=True, tag="regression_model_group"):
+                    with dpg.group(horizontal=True, height=60):
                         dpg.add_text(default_value="Model: ")
                         dpg.add_combo(
                                       items=self.model_options[self.gui.regression_selected],
                                       default_value=self.model_str,
                                       tag="model_str",
                                       width=200,
-                                      callback=self.update_value_callback
+                                      callback=self.update_ml_model_callback
                                     )
                                        
                         
@@ -260,7 +281,7 @@ class ParameterAdjustmentPanel:
                         label="Parameter Adjustments",
                         width=1000,
                         height=300,
-                        pos=(0, 310)):
+                        pos=(0, 350)):
             #dpg.add_text(label="Parameter Adjustements", color=(255, 255, 255))
 
             with dpg.table(header_row=False, resizable=True, policy=dpg.mvTable_SizingStretchProp,
@@ -281,7 +302,7 @@ class ParameterAdjustmentPanel:
                                             max_value=0.4,
                                             min_clamped=True,
                                             max_clamped=True,
-                                            callback=self.update_value_callback
+                                            callback=self.update_post_pred_callback
                                         )  
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
@@ -293,7 +314,7 @@ class ParameterAdjustmentPanel:
                                             max_value=45,
                                             min_clamped=True,
                                             max_clamped=True,
-                                            callback=self.update_value_callback
+                                            callback=self.update_post_pred_callback
                                         )
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Threshold angle mf2 (degrees): ")
@@ -304,7 +325,7 @@ class ParameterAdjustmentPanel:
                                             max_value=45,
                                             min_clamped=True,
                                             max_clamped=True,
-                                            callback=self.update_value_callback
+                                            callback=self.update_post_pred_callback
                                         )
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
@@ -316,7 +337,7 @@ class ParameterAdjustmentPanel:
                                             max_value=3,
                                             min_clamped=True,
                                             max_clamped=True,
-                                            callback=self.update_value_callback
+                                            callback=self.update_post_pred_callback
                                         )
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Gain Hand Close: ")
@@ -327,7 +348,7 @@ class ParameterAdjustmentPanel:
                                             max_value=3,
                                             min_clamped=True,
                                             max_clamped=True,
-                                            callback=self.update_value_callback
+                                            callback=self.update_post_pred_callback
                                         )
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
@@ -339,7 +360,7 @@ class ParameterAdjustmentPanel:
                                             max_value=3,
                                             min_clamped=True,
                                             max_clamped=True,
-                                            callback=self.update_value_callback
+                                            callback=self.update_post_pred_callback
                                         )
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Gain Supination: ")
@@ -350,7 +371,7 @@ class ParameterAdjustmentPanel:
                                             max_value=3,
                                             min_clamped=True,
                                             max_clamped=True,
-                                            callback=self.update_value_callback
+                                            callback=self.update_post_pred_callback
                                         )
                    
                 # Visualization buttons
@@ -382,31 +403,68 @@ class ParameterAdjustmentPanel:
                     dpg.add_button(label="Stop Prosthesis", callback=self.stop_prosthesis_callback)
                     
     #--------------- Button callbacks ---------------------#
-    def update_value_callback(self, sender, app_data):
-        '''Updates the configuration dictionary with the new values from the GUI.'''
-        if sender in self.post_pred_config.keys():
-            self.post_pred_config[sender] = app_data
-            print(self.post_pred_config)
-        else:  # Not the best solution, if the sender doesn't exist in any it just ends up in ml_model_config. Could do it better later.
-            if sender in self.selected_features.keys():
-                self.selected_features[sender] = app_data
-            else: 
-                self.ml_model_config[sender] = app_data
-            print(self.ml_model_config)
-
-        # pred_controller_keys = {"gain_hand_open", "gain_hand_close", "gain_pronation" ,"gain_supination", "deadband_radius"}
-        # if sender in pred_controller_keys:
-        #     config_subset = {k: self.post_pred_config[k] for k in pred_controller_keys}
-        #     self.pred_controller.update_config(**config_subset)
-
+    def update_post_pred_callback(self, sender, app_data):
+        '''Updates the post-prediction configuration dictionary with the new values from the GUI.'''
+        self.post_pred_config[sender] = app_data
+        print(self.post_pred_config)
+        
+        # Update post-prediction controller with the new values
         if sender in self.pred_controller.__dict__.keys():
             self.pred_controller.update_config(**{sender: app_data})
             self.pred_controller.__dict__[sender] = app_data
 
+        # Check if plot is running and update plot manager dict. Do this check to avoid 
         plot_config_keys = {"deadband_radius", "thr_angle_mf1", "thr_angle_mf2"}
         if sender in plot_config_keys and self.plot_running:
-            config_subset = {k: self.post_pred_config[k] for k in plot_config_keys}
+            #config_subset = {k: self.post_pred_config[k] for k in plot_config_keys}
             self.plot_config[sender] = app_data
+    
+    def update_ml_model_callback(self, sender, app_data):
+        '''Updates the ML model configuration dictionary with the new values from the GUI.'''
+        # Check if it's an optional feature
+        if sender in self.optional_features:
+            self.selected_features[sender] = app_data
+            print(self.ml_model_config)
+            return
+
+        # Check if it's a feature group (tagged with 'fg_')
+        if sender.startswith("fg_"):
+            group_name = sender[3:]
+            # Check if the group name is valid
+            if group_name in self.optional_feature_groups:
+                features = FeatureExtractor().get_feature_groups().get(group_name, [])
+                # add all features in the group to the selected features
+                for feature in features:
+                    self.selected_features[feature] = app_data
+                print(self.ml_model_config)
+                return
+
+        # Otherwise, default to ML model config
+        self.ml_model_config[sender] = app_data
+        print(self.ml_model_config)
+    
+    
+    # def update_value_callback(self, sender, app_data):
+    #     '''Updates the configuration dictionary with the new values from the GUI.'''
+    #     if sender in self.post_pred_config.keys():
+    #         self.post_pred_config[sender] = app_data
+    #         print(self.post_pred_config)
+    #         return
+    #     else:  # Not the best solution, if the sender doesn't exist in any it just ends up in ml_model_config. Could do it better later.
+    #         if sender in self.optional_features: #self.selected_features.keys():
+    #             self.selected_features[sender] = app_data
+    #         elif sender in self.optional_feature_groups:
+    #             selected_features = FeatureExtractor().get_feature_groups()[sender]
+    #             for feature in selected_features:
+    #                 self.selected_features[feature] = app_data
+    #         else: 
+    #             self.ml_model_config[sender] = app_data
+    #         print(self.ml_model_config)
+
+    #     # pred_controller_keys = {"gain_hand_open", "gain_hand_close", "gain_pronation" ,"gain_supination", "deadband_radius"}
+    #     # if sender in pred_controller_keys:
+    #     #     config_subset = {k: self.post_pred_config[k] for k in pred_controller_keys}
+    #     #     self.pred_controller.update_config(**config_subset)
 
 
     def reset_model_callback(self):
@@ -549,6 +607,7 @@ class ParameterAdjustmentPanel:
             self.predictor_running = True
 
     def get_settings(self):
+        # Do I need this? This gets updated every time a change in gui happens
         self.deadband_radius = float(dpg.get_value(item="deadband_radius"))
         self.gain_hand_open = float(dpg.get_value(item="gain_hand_open"))
         self.gain_hand_close = float(dpg.get_value(item="gain_hand_close"))
@@ -561,7 +620,7 @@ class ParameterAdjustmentPanel:
         self.training_data_folder = dpg.get_value(item="training_data_folder")
         self.training_media_folder = dpg.get_value(item="training_media_folder")
         self.model_str = dpg.get_value(item="model_str")
-        self.selected_features = {feature: dpg.get_value(item=feature) for feature in self.optional_features} 
+        #self.selected_features = {feature: dpg.get_value(item=feature) for feature in self.optional_features} 
         print("Settings updated")
 
     def stop_controller(self):
@@ -640,10 +699,28 @@ class ParameterAdjustmentPanel:
                 
     
     def set_up_model(self, visualize: bool = False):
-        # Step 1: Parse offline training data
-        with open(self.training_data_folder + '/collection_details.json', 'r') as f:
-            collection_details = json.load(f)
+        """
+        Sets up the model for the predictor. This includes loading the training data, extracting features, and fitting the machine learning model.
+        Parameters
+        ----------
+        visualize: bool, default=False
+            If True, a plot of the offline prediction stream from the training data will be shown. 
+        """
+        # Read collection details from JSON file, storing pre-training metadata
+        collection_file_path = os.path.join(self.training_data_folder, 'collection_details.json')
+        if not os.path.exists(collection_file_path):
+            print(f"[INFO] File not found: {collection_file_path}. Skipping loading collection details. Try giving the correct training data path.")
+            return
         
+        with open(collection_file_path, 'r') as f:
+            collection_details = json.load(f)
+
+        self.num_motions = collection_details['num_motions']
+        self.num_reps = collection_details['num_reps']
+        self.motion_names = collection_details['classes']
+        self.class_map = collection_details['class_map']
+
+
         def _match_metadata_to_data(metadata_file: str, data_file: str, class_map: dict) -> bool:
             """
             Ensures the correct animation metadata file is matched with the correct EMG data file.
@@ -677,10 +754,7 @@ class ParameterAdjustmentPanel:
 
             return metadata_file == expected_metadata_file
         
-        self.num_motions = collection_details['num_motions']
-        self.num_reps = collection_details['num_reps']
-        self.motion_names = collection_details['classes']
-        self.class_map = collection_details['class_map']
+        # Step 1: Parse offline training data
         
         if self.gui.regression_selected:
             regex_filters = [

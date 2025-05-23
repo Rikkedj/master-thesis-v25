@@ -1,9 +1,9 @@
 {
-    "gain_hand_open": 1.5000001192092896,
+    "gain_hand_open": 1,
     "gain_hand_close": 1,
     "gain_pronation": 1,
     "gain_supination": 1,
-    "thr_angle_mf1": 41,
+    "thr_angle_mf1": 45,
     "thr_angle_mf2": 45,
     "deadband_radius": 0.1
 }{
@@ -15,7 +15,7 @@
     "selected_features": {
         "MAV": true,
         "ZC": true,
-        "WL": false,
-        "MYOP": false
+        "SSC": true,
+        "WL": true
     }
 }
