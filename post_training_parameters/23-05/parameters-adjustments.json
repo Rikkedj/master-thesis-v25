@@ -1,0 +1,21 @@
+{
+    "gain_hand_open": 1.5000001192092896,
+    "gain_hand_close": 1,
+    "gain_pronation": 1,
+    "gain_supination": 1,
+    "thr_angle_mf1": 41,
+    "thr_angle_mf2": 45,
+    "deadband_radius": 0.1
+}{
+    "window_size": 200,
+    "window_increment": 100,
+    "training_data_folder": "data/regression",
+    "training_media_folder": "animation/",
+    "model_str": "LR",
+    "selected_features": {
+        "MAV": true,
+        "ZC": true,
+        "WL": false,
+        "MYOP": false
+    }
+}

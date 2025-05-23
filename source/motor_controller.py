@@ -76,7 +76,9 @@ def get_motor_setpoints(pred, thr_angle_mf1=45, thr_angle_mf2=45, max_value=1):
     Returns:   
     ----------
     list: 
-        List of motor setpoints for each motor function (e.g., [mf1_setpoint, mf2_setpoint]).
+        List of motor setpoints for each motor class / mechanical motor.
+        For this system the motor driver takes as input a list of 4 values, where the first two are for the hand open/close and the last two are for the pronation/supination.
+        This gives: [hand_open, hand_close, pronation, supination]
     """
     motor_setpoint = [0, 0, 0, 0] # rest position
 
@@ -86,7 +88,7 @@ def get_motor_setpoints(pred, thr_angle_mf1=45, thr_angle_mf2=45, max_value=1):
 
     if thr_angle_mf1 < abs(theta_deg) < (180 - thr_angle_mf1): # mf2 active
         activation = level_proportional_activation_profile(abs(mf2), k1=30, k2=30, a=0.3, b=0.7, w1=0.5, w2=0.5)
-        motor_setpoint[2 if mf2 > 0 else 3] = int(min(abs(activation)*max_value, max_value))
+        motor_setpoint[2 if mf2 < 0 else 3] = int(min(abs(activation)*max_value, max_value))
         #int(min(abs(mf2 / max_value * 255), 255))
     if abs(theta_deg) < (90 - thr_angle_mf2) or abs(theta_deg) > (90 + thr_angle_mf2): # mf 1 active
         activation = level_proportional_activation_profile(abs(mf1), k1=30, k2=30, a=0.3, b=0.7, w1=0.5, w2=0.5)

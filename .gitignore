@@ -23,6 +23,7 @@ __pycache__/
 venv/
 venv311/
 venv-331/
+venv*/
 
 # Ignore pyenv and pipenv virtual environments
 .python-version

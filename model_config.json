@@ -1,0 +1,9 @@
+{
+    "window_size": 200,
+    "window_increment": 100,
+    "deadband": 0.1,
+    "thr_angle_mf1": 45,
+    "thr_angle_mf2": 45,
+    "gain_mf1": 1,
+    "gain_mf2": 1
+}

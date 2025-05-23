@@ -35,8 +35,9 @@ class ParameterAdjustmentGUI:
         The prediction model used, given as string.
     training_data_folder : str
         The folder where the training data is stored. This is used to load the training data for the prediction model.
-    feature_list : list
-        The list of features that are used for the prediction model.
+    training_media_folder : str
+        The folder where the training media is stored. This is used for getting the labels for training the regressor, as well as load the  media for plotting.
+        If None, no media will be displayed. The media shows the motor functions that are being predicted.
     regression_selected : bool
         If True, the regression model is selected. This is used to determine which model to use for prediction.
     width : int
@@ -52,10 +53,10 @@ class ParameterAdjustmentGUI:
                  params,
                  axis_media=None,
                  model_str=None,
-                 training_data_folder = './data/', 
-                 feature_list=None,
-                 regression_selected=False,
-                 width=1100,
+                 training_data_folder = 'data/',
+                 training_media_folder = 'animation/', # default for regression 
+                 regression_selected=True,
+                 width=2000,
                  height=900,
                  debug=False, # Not shure if this is necessary
                  clean_up_on_kill=False):
@@ -68,7 +69,7 @@ class ParameterAdjustmentGUI:
         self.params = params
         self.regression_selected = regression_selected # Bool that tells if the regression model is selected
         self.training_data_folder = training_data_folder
-        self.feature_list = feature_list 
+        self.training_media_folder = training_media_folder
         
         self.debug = debug # Usikker på hva denne er til, kan være den ikke trengs
         self.clean_up_on_kill = clean_up_on_kill # Not shure what this is either, but is used in the GUI class
@@ -112,14 +113,14 @@ class ParameterAdjustmentGUI:
                 
             with dpg.menu(label="Model"):
                 dpg.add_menu_item(label="Adjust Parameters", callback=self._adjust_param_callback, show=True)
-        
         self._adjust_param_callback()
                 
     def _adjust_param_callback(self):
         panel_arguments = list(inspect.signature(ParameterAdjustmentPanel.__init__).parameters) 
         passed_arguments = {i: self.params[i] for i in self.params.keys() if i in panel_arguments} 
-        self.pap = ParameterAdjustmentPanel(**passed_arguments, gui=self, training_data_folder=self.training_data_folder) 
+        self.pap = ParameterAdjustmentPanel(**passed_arguments, gui=self, training_data_folder=self.training_data_folder, training_media_folder=self.training_media_folder) # Could give only gui as input and extrct training folders from there
         self.pap.spawn_configuration_window()
+
 
     def _exit_window_callback(self):
         #self.clean_up_on_kill = True

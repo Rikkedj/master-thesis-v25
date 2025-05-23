@@ -62,27 +62,40 @@ class ParameterAdjustmentPanel:
         The datafolder where the training data is stored. This is used for training the machine learning model.
     '''
     def __init__(self,
-                 window_size=150,                 
-                 window_increment=50,
+                 window_size=200,                 
+                 window_increment=100,
                  deadband_radius=0.1,
-                 thr_angle_mf1=20,
-                 thr_angle_mf2=20,
-                 gain_mf1=0.5,
-                 gain_mf2=0.5,
-                 training_data_folder='./data/',
+                 thr_angle_mf1=45,
+                 thr_angle_mf2=45,
+                 gain_hand_open=1,
+                 gain_hand_close=1,
+                 gain_pronation=1,
+                 gain_supination=1,
+                 training_data_folder='data/',
+                 training_media_folder='animation/', # default for regression
                  gui=None):
-        
-        #self.motor_selector = MotorFunctionSelector() # Create the prosthesis controller object
         
         self.window_increment = window_increment
         self.window_size = window_size
         self.deadband_radius = deadband_radius
         self.thr_angle_mf1 = thr_angle_mf1
         self.thr_angle_mf2 = thr_angle_mf2
-        self.gain_mf1 = gain_mf1
-        self.gain_mf2 = gain_mf2 
+        self.gain_hand_open = gain_hand_open
+        self.gain_hand_close = gain_hand_close
+        self.gain_pronation = gain_pronation
+        self.gain_supination = gain_supination
         self.gui = gui
         self.training_data_folder = training_data_folder
+        self.training_media_folder = training_media_folder
+        self.model_str = gui.model_str # Initial model string, but can be changed in gui
+        self.optional_features = ["MAV", "ZC", "WL", "MYOP"]
+        self.selected_features = {}
+        self.model_options = { True: ["LR", "SVM", "MLP", "RF", "GB"],                  # If regression is selected
+                               False: ["LDA", "KNN", "SVM", "MLP", "RF", "QDA", "NB"]}  # classification
+
+        self.flutter_filter = FlutterRejectionFilter() # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.            
+        self.pred_controller = PostPredictionController() # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.
+
         # Manager for multiprocessing - so that we can handle interactive inputs from GUI
         manager = Manager() # This is what takes much time when initiating
         # This needs to be a manager dict, so that it can be shared between processes. Since plotting happens in another process it needs to be this. 
@@ -94,27 +107,24 @@ class ParameterAdjustmentPanel:
             "controller_running": False
         })
         self.post_pred_config = {
-            "gain_mf1": self.gain_mf1,
-            "gain_mf2": self.gain_mf2,
+            "gain_hand_open": self.gain_hand_open,
+            "gain_hand_close": self.gain_hand_close,
+            "gain_pronation": self.gain_pronation,
+            "gain_supination": self.gain_supination,
             "thr_angle_mf1": self.thr_angle_mf1,
             "thr_angle_mf2": self.thr_angle_mf2,
             "deadband_radius": self.deadband_radius
         }
+        self.ml_model_config = {
+            "window_size": self.window_size,
+            "window_increment": self.window_increment,
+            "training_data_folder": self.training_data_folder,
+            "training_media_folder": self.training_media_folder,
+            "model_str": self.model_str,
+            "selected_features": self.selected_features
+        }
 
-        # self.configuration = manager.dict({
-        #     "deadband": self.deadband,
-        #     "thr_angle_mf1": self.thr_angle_mf1,
-        #     "thr_angle_mf2": self.thr_angle_mf2,
-        #     "gain_mf1": self.gain_mf1,
-        #     "gain_mf2": self.gain_mf2,
-        #     "window_size": self.window_size,
-        #     "window_increment": self.window_increment,
-        #     "controller_running": False
-        # })
-
-        self.flutter_filter = FlutterRejectionFilter() # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.            
-        self.pred_controller = PostPredictionController() # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.
-
+        
         # Predictor (classifier or regressor) and queue for predictions for passing via multiprocesses and threads
         self.predictor = None
         self.prediction_queue = Queue()
@@ -136,16 +146,24 @@ class ParameterAdjustmentPanel:
         self.UDP_IP = "127.0.0.1"
         self.UDP_PORT = 5005
 
-        self.widget_tags = {"configuration": ['__mc_configuration_window',
-                                                'deadband_radius', 
-                                                'thr_angle_mf1',
-                                                'thr_angle_mf2',
-                                                'gain_mf1',
-                                                'gain_mf2',
+        # TODO: Should seperate the tags for each window
+        self.widget_tags = {"model_settings": ['model_adjustment_window',
                                                 'window_size',
                                                 'window_increment',
-                                                'save_config_tag',
-                                                'training_data_folder']}                           
+                                                'model_str',
+                                                'training_data_folder',
+                                                'training_media_folder'
+                                                ],
+                            "parameters": [ 'parameter_adjustment_window',
+                                            'deadband_radius', 
+                                            'thr_angle_mf1',
+                                            'thr_angle_mf2',
+                                            'gain_hand_open',
+                                            'gain_hand_close',
+                                            'gain_pronation',
+                                            'gain_supination',
+                                            'save_config_tag']
+                                           }                           
 
     def cleanup_window(self, window_name): # Don't really know what this does
         widget_list = self.widget_tags[window_name]
@@ -154,26 +172,34 @@ class ParameterAdjustmentPanel:
                 dpg.delete_item(w)
 
     def spawn_configuration_window(self):
-        self.cleanup_window("configuration")
-        with dpg.window(tag="__mc_configuration_window",
-                        label="Parameter Adjustments",
-                        width=900,
-                        height=480):
-            dpg.add_text(label="Parameter Adjustements", color=(255, 255, 255), bullet=True)
-
+        self.cleanup_window("model_settings")
+        self.cleanup_window("parameters")
+        #### WINDOW FOR MACHINE LEARNING MODEL SETTINGS ############
+        with dpg.window(tag="model_adjustment_window",
+                        label="ML Model Settings",
+                        width=1000,
+                        height=250,
+                        pos=(0, 0)):
+            #dpg.add_text(label="Model Configuration", color=(255, 255, 255))
             with dpg.table(header_row=False, resizable=True, policy=dpg.mvTable_SizingStretchProp,
-                   borders_outerH=True, borders_innerV=True, borders_innerH=True, borders_outerV=True):
+                           borders_outerH=True, borders_innerV=True, borders_innerH=True, borders_outerV=True):
 
+                #dpg.add_table_row(label="ML Model Settings", tag="__ml_model_settings")
                 dpg.add_table_column(label="")
                 dpg.add_table_column(label="")
-                dpg.add_table_column(label="")
-
+                
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
-                        dpg.add_text(default_value="Training data folder: ")
+                        dpg.add_text(default_value="Training data folder \n(must be set correctly before starting predictions): ")
                         dpg.add_input_text(default_value=self.training_data_folder,
                                             tag="training_data_folder",
-                                            width=200,
+                                            width=300,
+                                        )
+                    with dpg.group(horizontal=True):
+                        dpg.add_text(default_value="Training media folder \n(where labels for regression is stored): ")
+                        dpg.add_input_text(default_value=self.training_media_folder,
+                                            tag="training_media_folder",
+                                            width=300,
                                         )
                 # Add window size and increment for predictor
                 with dpg.table_row():
@@ -189,15 +215,61 @@ class ParameterAdjustmentPanel:
                         dpg.add_text(default_value="Window Increment: ")
                         dpg.add_input_int(default_value=self.window_increment,
                                             tag="window_increment",
-                                            width=100,
+                                            width=200,
                                             callback=self.update_value_callback # Give another callback, that gets settings, updates plot and updates model
                                         )
+                with dpg.table_row(): 
                     with dpg.group(horizontal=True):
-                        dpg.add_button(label="Re-fit Model", 
-                                       width = len("Re-fit Model")*10,
+                        dpg.add_text(default_value="Features: ")
+                        for feature in self.optional_features:
+                            dpg.add_checkbox(label=feature, 
+                                             tag=feature,
+                                             default_value=False,
+                                             callback=self.update_value_callback
+                                            )
+                            self.selected_features[feature] = False
+                
+                with dpg.table_row():
+                    with dpg.group(horizontal=True, tag="regression_model_group"):
+                        dpg.add_text(default_value="Model: ")
+                        dpg.add_combo(
+                                      items=self.model_options[self.gui.regression_selected],
+                                      default_value=self.model_str,
+                                      tag="model_str",
+                                      width=200,
+                                      callback=self.update_value_callback
+                                    )
+                                       
+                        
+                with dpg.table_row():
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Visualize Offline Predictions", callback=self.visualize_offline_predictions)
+                    
+                    dpg.add_button(label="Visualize Raw EMG", callback=self.plot_raw_data_callback)
+                
+                with dpg.table_row():
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Re-fit Model",
+                                       width=len("Re-fit Model") * 15,
                                        callback=self.reset_model_callback
                                     )
-                        
+                    
+
+        #### WINDOW FOR POST-PREDICTION CONTROLLER SETTINGS ############
+        with dpg.window(tag="parameter_adjustment_window",
+                        label="Parameter Adjustments",
+                        width=1000,
+                        height=300,
+                        pos=(0, 310)):
+            #dpg.add_text(label="Parameter Adjustements", color=(255, 255, 255))
+
+            with dpg.table(header_row=False, resizable=True, policy=dpg.mvTable_SizingStretchProp,
+                   borders_outerH=True, borders_innerV=True, borders_innerH=True, borders_outerV=True):
+
+                dpg.add_table_column(label="")
+                dpg.add_table_column(label="")
+                dpg.add_table_column(label="")
+                      
                 # Add deadband_radius and threshold for regressor   
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
@@ -236,9 +308,9 @@ class ParameterAdjustmentPanel:
                                         )
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
-                        dpg.add_text(default_value="Gain mf1: ")
-                        dpg.add_input_float(default_value=self.gain_mf1,
-                                            tag="gain_mf1",
+                        dpg.add_text(default_value="Gain Hand Open: ")
+                        dpg.add_input_float(default_value=self.gain_hand_open,
+                                            tag="gain_hand_open",
                                             width=100,
                                             min_value=0.5,
                                             max_value=3,
@@ -247,9 +319,9 @@ class ParameterAdjustmentPanel:
                                             callback=self.update_value_callback
                                         )
                     with dpg.group(horizontal=True):
-                        dpg.add_text(default_value="Gain mf2: ")
-                        dpg.add_input_float(default_value=self.gain_mf2,
-                                            tag="gain_mf2",
+                        dpg.add_text(default_value="Gain Hand Close: ")
+                        dpg.add_input_float(default_value=self.gain_hand_close,
+                                            tag="gain_hand_close",
                                             width=100,
                                             min_value=0.5,
                                             max_value=3,
@@ -257,6 +329,35 @@ class ParameterAdjustmentPanel:
                                             max_clamped=True,
                                             callback=self.update_value_callback
                                         )
+                with dpg.table_row():
+                    with dpg.group(horizontal=True):
+                        dpg.add_text(default_value="Gain Pronation: ")
+                        dpg.add_input_float(default_value=self.gain_pronation,
+                                            tag="gain_pronation",
+                                            width=100,
+                                            min_value=0.5,
+                                            max_value=3,
+                                            min_clamped=True,
+                                            max_clamped=True,
+                                            callback=self.update_value_callback
+                                        )
+                    with dpg.group(horizontal=True):
+                        dpg.add_text(default_value="Gain Supination: ")
+                        dpg.add_input_float(default_value=self.gain_supination,
+                                            tag="gain_supination",
+                                            width=100,
+                                            min_value=0.5,
+                                            max_value=3,
+                                            min_clamped=True,
+                                            max_clamped=True,
+                                            callback=self.update_value_callback
+                                        )
+                   
+                # Visualization buttons
+                with dpg.table_row():
+                    dpg.add_button(label="Visualize Real-Time Predictions", callback=self.prediction_btn_callback)
+                    dpg.add_button(label="Stop Prediction Plot", callback=self.stop_prediction_plot)
+
                     with dpg.group(horizontal=True): # Button to store the configuration
                         dpg.add_button(label="Save Configuration", 
                                        width = len("Save Configuration")*10,
@@ -275,29 +376,38 @@ class ParameterAdjustmentPanel:
                         ):
                             dpg.add_file_extension(".json", color=(0, 255, 0, 255)) # Filter for json
                             dpg.add_file_extension(".*") # Allow all files too
-                # Visualization buttons
-                with dpg.table_row():
-                    dpg.add_button(label="Visualize Prediction", callback=self.prediction_btn_callback)
-                    dpg.add_button(label="Stop Prediction Plot", callback=self.stop_prediction_plot)
-                    dpg.add_button(label="Visualize Raw EMG", callback=self.plot_raw_data_callback)
+                    
                 with dpg.table_row():
                     dpg.add_button(label="Run Prosthesis", callback=self.run_prosthesis_callback)
                     dpg.add_button(label="Stop Prosthesis", callback=self.stop_prosthesis_callback)
-    
+                    
     #--------------- Button callbacks ---------------------#
     def update_value_callback(self, sender, app_data):
         '''Updates the configuration dictionary with the new values from the GUI.'''
-        self.post_pred_config[sender] = app_data      
-        pred_controller_keys = {"gain_mf1", "gain_mf2", "deadband_radius"}
-        if sender in pred_controller_keys:
-            config_subset = {k: self.post_pred_config[k] for k in pred_controller_keys}
-            self.pred_controller.update_config(**config_subset)
+        if sender in self.post_pred_config.keys():
+            self.post_pred_config[sender] = app_data
+            print(self.post_pred_config)
+        else:  # Not the best solution, if the sender doesn't exist in any it just ends up in ml_model_config. Could do it better later.
+            if sender in self.selected_features.keys():
+                self.selected_features[sender] = app_data
+            else: 
+                self.ml_model_config[sender] = app_data
+            print(self.ml_model_config)
+
+        # pred_controller_keys = {"gain_hand_open", "gain_hand_close", "gain_pronation" ,"gain_supination", "deadband_radius"}
+        # if sender in pred_controller_keys:
+        #     config_subset = {k: self.post_pred_config[k] for k in pred_controller_keys}
+        #     self.pred_controller.update_config(**config_subset)
+
+        if sender in self.pred_controller.__dict__.keys():
+            self.pred_controller.update_config(**{sender: app_data})
+            self.pred_controller.__dict__[sender] = app_data
+
         plot_config_keys = {"deadband_radius", "thr_angle_mf1", "thr_angle_mf2"}
         if sender in plot_config_keys and self.plot_running:
             config_subset = {k: self.post_pred_config[k] for k in plot_config_keys}
             self.plot_config[sender] = app_data
 
-        print(self.post_pred_config)
 
     def reset_model_callback(self):
         ''' Resets the model for when the window size or increment is changed, and reset model button is pressed.'''
@@ -312,6 +422,11 @@ class ParameterAdjustmentPanel:
         self.run_predictor()
         ("Model reset. Press Visualize Prediction to start again.")
         #self.spawn_configuration_window()
+
+    def visualize_offline_predictions(self):
+        self.get_settings() # Get the settings from the GUI
+        self.set_up_model(visualize=True)
+
 
     def prediction_btn_callback(self):
         if not (self.gui.online_data_handler and sum(list(self.gui.online_data_handler.get_data()[1].values()))):
@@ -374,12 +489,11 @@ class ParameterAdjustmentPanel:
         if self.prosthesis and self.prosthesis.is_connected():
             self.prosthesis.disconnect() # Disconnect the prosthesis
             self.prosthesis = None
-        print("STop controller thread in stop prosthesis")
+        print("Stop controller thread in stop prosthesis")
         # Only stop controller if plotting thread is not running
         if not self.plot_running:
             self.stop_controller()    
         
-
     ## Callbacks for plotting raw EMG - from LibEMG
     def plot_raw_data_callback(self):
         self.visualization_thread = threading.Thread(target=self._run_visualization_helper)
@@ -413,18 +527,15 @@ class ParameterAdjustmentPanel:
 
 
     def _save_configuration_to_file(self, file_path: Path):
-        """Saves the current configuration to a file."""
+        """Saves the current configuration to a file, both post-prediction adjustments and model settings."""
         try:
             # Ensure parent directory exists
             file_path.parent.mkdir(parents=True, exist_ok=True)
             self.get_settings() # Get the settings from the GUI
-            # TODO: Don't need this as function in motor selection, makes more sense just to have it in this class?
-            #self.motor_selector.set_parameters(gain_mf1=self.gain_mf1, gain_mf2=self.gain_mf2, thr_angle_mf1=self.thr_angle_mf1, thr_angle_mf2=self.thr_angle_mf2,deadband_radius=self.deadband_radius) # Set the configuration in the prosthesis controller
-            #self.motor_selector.write_to_json(file_path) # Save the configuration to a file
-            # Convert Manager.dict proxy to a standard dict 
-            # config_to_save = dict(self.configuration) 
             with open(file_path, 'w') as f:
-                json.dump(self.post_pred_config, f, indent=4) # Save the configuration to a file
+                # TODO: Could find a cleaner way to store this, now they're dumped in same file as two dictionaries. 
+                json.dump(self.post_pred_config, f, indent=4) # Save the post-prediction settings to a file
+                json.dump(self.ml_model_config, f, indent=4) # Save the model settings to a file
             print(f"Configuration saved to {file_path}")
         except Exception as e:
             print(f"Error saving configuration: {e}")
@@ -439,13 +550,18 @@ class ParameterAdjustmentPanel:
 
     def get_settings(self):
         self.deadband_radius = float(dpg.get_value(item="deadband_radius"))
-        self.gain_mf1 = float(dpg.get_value(item="gain_mf1"))
-        self.gain_mf2 = float(dpg.get_value(item="gain_mf2"))
+        self.gain_hand_open = float(dpg.get_value(item="gain_hand_open"))
+        self.gain_hand_close = float(dpg.get_value(item="gain_hand_close"))
+        self.gain_pronation = float(dpg.get_value(item="gain_pronation"))
+        self.gain_supination = float(dpg.get_value(item="gain_supination"))
         self.thr_angle_mf1 = int(dpg.get_value(item="thr_angle_mf1"))
         self.thr_angle_mf2 = int(dpg.get_value(item="thr_angle_mf2"))
         self.window_size = int(dpg.get_value(item="window_size"))
         self.window_increment = int(dpg.get_value(item="window_increment"))
         self.training_data_folder = dpg.get_value(item="training_data_folder")
+        self.training_media_folder = dpg.get_value(item="training_media_folder")
+        self.model_str = dpg.get_value(item="model_str")
+        self.selected_features = {feature: dpg.get_value(item=feature) for feature in self.optional_features} 
         print("Settings updated")
 
     def stop_controller(self):
@@ -523,7 +639,7 @@ class ParameterAdjustmentPanel:
             print("Socket closed")
                 
     
-    def set_up_model(self):
+    def set_up_model(self, visualize: bool = False):
         # Step 1: Parse offline training data
         with open(self.training_data_folder + '/collection_details.json', 'r') as f:
             collection_details = json.load(f)
@@ -534,7 +650,7 @@ class ParameterAdjustmentPanel:
 
             Args:
                 metadata_file (str): Metadata file path (e.g., "animation/collection_hand_open_close.txt").
-                data_file (str): EMG data file path (e.g., "data/regression/C_0_R_01_emg.csv").
+                data_file (str): EMG data file path (e.g., "data/regression/C_0_R_1_emg.csv").
                 class_map (dict): Dictionary mapping class index (str) to motion filenames.
 
             Returns:
@@ -543,6 +659,7 @@ class ParameterAdjustmentPanel:
             # Extract class index from data filename (C_{k}_R pattern)
             match = re.search(r"C_(\d+)_R", data_file)
             if not match:
+                print(f"No valid class index found in data file: {data_file}")
                 return False  # No valid class index found
 
             class_index = match.group(1)  # Extract class index as a string
@@ -550,10 +667,13 @@ class ParameterAdjustmentPanel:
             # Find the expected metadata file from class_map
             expected_metadata = class_map.get(class_index)
             if not expected_metadata:
+                print(f"No matching motion found for class index {class_index}.")
                 return False  # No matching motion found
 
             # Construct the expected metadata filename
-            expected_metadata_file = f"animation/{expected_metadata}.txt"
+
+            #expected_metadata_file = f"animation/test/saw_tooth/{expected_metadata}.txt"
+            expected_metadata_file = str(self.training_media_folder)+f"{expected_metadata}.txt"
 
             return metadata_file == expected_metadata_file
         
@@ -568,7 +688,7 @@ class ParameterAdjustmentPanel:
                 RegexFilter(left_bound = "R_", right_bound="_emg.csv", values = [str(i) for i in range(self.num_reps)], description='reps') # TODO! Add a way to remove the discard the first rep
             ]
             metadata_fetchers = [
-                FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=self.motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, self.class_map) ) #package_function=lambda x, y: True)
+                FilePackager(RegexFilter(left_bound=self.training_media_folder, right_bound='.txt', values=self.motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, self.class_map) ) #package_function=lambda x, y: True)
             ]
             labels_key = 'labels'
             metadata_operations = {'labels': 'last_sample'}
@@ -580,20 +700,17 @@ class ParameterAdjustmentPanel:
             metadata_fetchers = None
             labels_key = 'classes'
             metadata_operations = None
-        
-        offline_dh = OfflineDataHandler()
-        offline_dh.get_data('./', regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
-        train_windows, train_metadata = offline_dh.parse_windows(self.window_size, self.window_increment, metadata_operations=metadata_operations)
 
+        offline_data_handler = OfflineDataHandler()
+        offline_data_handler.get_data('./', regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
+        
+        train_windows, train_metadata = offline_data_handler.parse_windows(self.window_size, self.window_increment, metadata_operations=metadata_operations)
+        
         # Step 2: Extract features from offline data
         fe = FeatureExtractor()
         print("Extracting features")
-        if self.gui.feature_list is not None:
-            feature_list = self.gui.feature_list
-        else: 
-            feature_list = fe.get_feature_groups()['HTD']
-        
-        training_features = fe.extract_features(feature_list, train_windows, array=True)
+        selected_feature_list = [feature for feature, is_selected in self.selected_features.items() if is_selected]
+        training_features = fe.extract_features(selected_feature_list, train_windows, array=True)
 
         # Step 3: Dataset creation
         data_set = {}
@@ -603,26 +720,29 @@ class ParameterAdjustmentPanel:
 
         # Step 4: Create and fit the prediction model
         self.gui.online_data_handler.prepare_smm()
-        model = self.gui.model_str
+        #model = self.gui.model_str
+
         print('Fitting model...')
         if self.gui.regression_selected:
             # Regression
-            emg_model = EMGRegressor(model=model)
+            emg_model = EMGRegressor(model=self.model_str)
             emg_model.fit(feature_dictionary=data_set)
-            # consider adding a threshold angle here, or just do this when setting up the controller
+            if visualize:
+                train_labels = train_metadata[labels_key]
+                preds = emg_model.run(training_features)
+                emg_model.visualize(train_labels, preds)
             #emg_model.add_deadband_radius(self.deadband_radius) # Add a deadband_radius to the regression model. Value below this threshold will be considered 0.
-            self.predictor = OnlineEMGRegressor(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, feature_list, ip=self.UDP_IP, port=self.UDP_PORT, std_out=False)
+            self.predictor = OnlineEMGRegressor(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, selected_feature_list, ip=self.UDP_IP, port=self.UDP_PORT, std_out=False)
         else:
             # Classification
+            model = dpg.get_value(item="classifier_model") # TODO: Can add this to self.model_str when setting settings
             emg_model = EMGClassifier(model=model)
             emg_model.fit(feature_dictionary=data_set)
-            emg_model.add_velocity(train_windows, train_metadata[labels_key])
-            self.predictor = OnlineEMGClassifier(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, feature_list, output_format='probabilities', ip=self.UDP_IP, port=self.UDP_PORT)
-
+            #emg_model.add_velocity(train_windows, train_metadata[labels_key])
+            self.predictor = OnlineEMGClassifier(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, selected_feature_list, output_format='probabilities', ip=self.UDP_IP, port=self.UDP_PORT)
         # Step 5: Create online EMG model and start predicting.
-        print('Model fitted!')
-    
-    
+        print('Model fitted!')  
+           
     def _run_visualization_helper(self):
         self.gui.online_data_handler.visualize(block=False)
 

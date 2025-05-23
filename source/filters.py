@@ -1,47 +1,79 @@
 import numpy as np
 
 class PostPredictionController:
-    def __init__(self, gain_mf1=1.0, gain_mf2=1.0, thr_angle_mf1=45, thr_angle_mf2=45, deadband_radius=0.0): # TODO: Consider having gain for each motion class, not only motor function
+    def __init__(self, gain_hand_open=1.0, gain_hand_close=1.0, gain_pronation=1.0, gain_supination=1.0, thr_angle_mf1=45, thr_angle_mf2=45, deadband_radius=0.0): # TODO: Consider having gain for each motion class, not only motor function
         """
         Post-prediction controller to scale the output of the prediction model.
 
-        Parameters:
+        Parameters: TODO: Should change these to be more modular / dynamic. Works hardcoded for now. 
         -------------
-        gain (float): Gain applied to the output to scale the response.
+        gain_hand_open: float 
+            Gain for motion class hand open.
+        gain_hand_close: float
+            Gain for motion class hand close.
+        gain_pronation: float
+            Gain for motion class pronation.
+        gain_supination: float
+            Gain for motion class supination.
+        thr_angle_mf1: float
+            Threshold angle for motor function 1, i.e. hand open/close.
+        thr_angle_mf2: float
+            Threshold angle for motor function 2, i.e. pronation/supination.
+        deadband_radius: float
+            Deadband radius around origin for the prediction model. Every prediction within this range will be set to 0.
         """
-        self.gain_mf1 = gain_mf1
-        self.gain_mf2 = gain_mf2
+        self.gain_hand_open = gain_hand_open
+        self.gain_hand_close = gain_hand_close
+        self.gain_pronation = gain_pronation
+        self.gain_supination = gain_supination
         self.thr_angle_mf1 = thr_angle_mf1
         self.thr_angle_mf2 = thr_angle_mf2
         self.deadband_radius = deadband_radius
 
-    def update_config(self, gain_mf1=None, gain_mf2=None, thr_angle_mf1=None, thr_angle_mf2=None, deadband_radius=None):
+    # def update_config(self, gain_hand_open=None, gain_hand_close=None, gain_pronation=None, gain_supination=None, deadband_radius=None):
+    #     """
+    #     Set the configuration for the prosthetic device. NOTE! Could add checks here as well to ensure the values are within a certain range, or if they are valid values.
+    #     Parameters:
+    #     ----------
+    #     gain_hand_open: float TODO: Should change these to be more modular / dynamic. Works hardcoded for now. 
+    #         Gain for motion class hand open.
+    #     gain_hand_close: float
+    #         Gain for motion class hand close.
+    #     gain_pronation: float
+    #         Gain for motion class pronation.
+    #     gain_supination: float
+    #         Gain for motion class supination.
+    #     deadband_radius: float
+    #         Deadband radius around origin for the prediction model. Every prediction within this range will be set to 0.
+    #     """
+        # if gain_hand_open:
+        #     self.gain_hand_open = gain_hand_open
+        # if gain_hand_close:
+        #     self.gain_hand_close = gain_hand_close
+        # if gain_pronation:
+        #     self.gain_pronation = gain_pronation
+        # if gain_supination:
+        #     self.gain_supination = gain_supination
+        # if deadband_radius:
+        #     self.deadband_radius = deadband_radius
+        
+    def update_config(self, **kwargs):
         """
-        Set the configuration for the prosthetic device. NOTE! Could add checks here as well to ensure the values are within a certain range, or if they are valid values.
-        Parameters:
-        ----------
-            gains: List of gains for each motor function (list of floats).
-            thr_angle_mf1: Threshold angle for motor function 1 (float).
-            thr_angle_mf2: Threshold angle for motor function 2 (float).
-            deadband: Deadband value (float).
+        Update the configuration parameters for the post-prediction controller.
         """
-        if gain_mf1:
-            self.gain_mf1 = gain_mf1
-        if gain_mf2:
-            self.gain_mf2 = gain_mf2
-        #if thr_angle_mf1:
-        #    self.thr_angle_mf1 = thr_angle_mf1
-        #if thr_angle_mf2:
-        #    self.thr_angle_mf2 = thr_angle_mf2
-        if deadband_radius:
-            self.deadband_radius = deadband_radius
-
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise AttributeError(f"'{key}' is not a valid configuration parameter.")
 
     def apply_gains(self, prediction):
         """Apply gain to each prediction value."""
+        gain_mf1 = self.gain_hand_open if prediction[0] > 0 else self.gain_hand_close # Gain for motor function 1
+        gain_mf2 = self.gain_pronation if prediction[1] > 0 else self.gain_supination
         return np.array([
-            prediction[0] * self.gain_mf1,
-            prediction[1] * self.gain_mf2
+            prediction[0] * gain_mf1,
+            prediction[1] * gain_mf2
         ])
 
     def apply_deadband(self, prediction):
@@ -57,14 +89,15 @@ class PostPredictionController:
 
         Parameters:
         -------------
-        prediction (list): The input prediction signal.
+        prediction: list 
+            The input prediction signal.
 
         Returns:
+        -------------
         list: The updated prediction signal.
         """
         # Apply gain
         prediction = self.apply_gains(prediction)
-        
         # Apply deadband
         prediction = self.apply_deadband(prediction)
 
@@ -113,82 +146,3 @@ class FlutterRejectionFilter:
         else:
             return self.gain*nonlinear_output
     
-    ## Old version of filter, did not work very well
-    
-    # def apply_deadband(self, x):
-    #     """
-    #     Apply deadband to the signal (set it to zero if within the deadband range).
-
-    #     Parameters:
-    #     x (float): The input signal.
-
-    #     Returns:
-    #     float: The signal after deadband is applied.
-    #     """
-    #     deadband_mask = np.abs(x) < self.deadband_radius
-    #     x[deadband_mask] = 0.
-
-    #     # Tried different approaches. 
-    #     #if np.linalg.norm(x) < self.deadband_radius:
-    #     #    x[:] = 0.
-    #     # if abs(x) < self.deadband_radius:
-    #     #     return 0.0
-    #     return x
-    # def update_deadband_radius(self, new_radius):
-    #     self.deadband_radius = new_radius
-    # def update_gain(self, new_gain):
-    #     self.gain = new_gain
-    # def update_k(self, new_k):
-    #     self.k = new_k
-    # def update_dt(self, new_dt):
-    #     self.dt = new_dt
-    # def enable_integrator(self):
-    #     self.integrator_enabled = True
-
-
-    # def apply_filter(self, x, k):
-    #     """
-    #     Nonlinear filter function using tanh scaling.
-    #     """
-    #     return np.abs(x) * np.tanh(k * x)
-    
-    # def reset_integrator(self):
-    #     """
-    #     Reset the integrator state to zero.
-    #     """
-    #     self.integrator_output = None
-
-
-    # def apply(self, x):
-    #     """
-    #     Apply the flutter rejection filter, which includes a deadband, 
-    #     nonlinear tanh scaling, and optional integration.
-
-    #     Parameters:
-    #     -------------
-    #     x: array of float
-    #         The input signal.
-
-    #     Returns:
-    #         float: The filtered output signal.
-    #     """
-    #     # Apply the deadband first
-    #     x = np.array(x)
-    #     #x_deadbanded = self.apply_deadband(x)
-
-    #     # Nonlinear tanh function for flutter rejection
-    #     y = np.abs(x) * np.tanh(self.k * x)
-    #     y_gained = y * self.gain
-
-    #     # Apply the integrator
-    #     if self.integrator_enabled:
-    #         if self.integrated_output is None:
-    #             self.integrated_output = y_gained
-    #         else: 
-    #             self.integrated_output += y_gained * self.dt 
-                 
-    #         return self.integrated_output  # Return the integrated output
-        
-    #     else:
-    #         return y_gained       # If integrator is not enabled, just use the current output
-        

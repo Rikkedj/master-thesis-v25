@@ -23,26 +23,28 @@ class ProsthesisControlGUI:
     Class for a Simultaneous Proportional Prosthesis control system. Inspired by the Menu class in Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git.
     """
     def __init__(self):
-        streamer, sm = delsys_streamer(channel_list=[2,4,5,15]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
+        streamer, sm = delsys_streamer(channel_list=[2,4,6,8,15]) # returns streamer and the shared memory object, need to give in the active channels number -1, so 2 is sensor 3
         # Create online data handler to listen for the data
         self.odh = OnlineDataHandler(sm)
         # Learning model
         self.predictor = None # The classifier or regressor object
         self.model_str = None # The model string, used to identify the model type.
-        self.feature_list = None # The list of features to use for the model. If None, Hudgins Time Domain features are used.
-        
+        self.training_media_folder = "animation/" # Where the training media for the training protocol are stored. Gets set in launch_training. Default to if regression is selected.
         # The UDP IP and port of the controller. This is used to send the data from predictor to the controller.
         self.controller_IP = '127.0.0.1'
         self.controller_PORT = 5005 
 
-        # Initialize motor functions for the training protocol
-        #TODO: Consider taking only motor function as input, and give option if user wants combined movement training.
-        self.motor_functions = {
+        # Initialize motion classes for the training protocol
+        self.motion_classes = {
             'hand_open': (1, 0),            # Movement along x-axis
             'hand_close': (-1, 0),          # Movement along x-axis
             'pronation': (0, 1),            # Movement along y-axis
             'supination': (0, -1),          # Movement along y-axis
             'rest': (0, 0)                  # Rest position
+            # 'open_pronate': tuple(np.array([1, 1]) / np.sqrt(2)),          # Combined movement
+            # 'close_pronate': tuple(np.array([-1, 1]) / np.sqrt(2)),        # Combined movement
+            # 'open_supinate': tuple(np.array([1, -1]) / np.sqrt(2)),        # Combined movement
+            # 'close_supinate': tuple(np.array([-1, -1]) / np.sqrt(2))       # Combined movement
         }
         # TODO: Add images the simultanous gestures
         self.axis_media = {
@@ -93,8 +95,8 @@ class ProsthesisControlGUI:
         Label(self.window, font=("Arial bold", 20), text = 'Simultaneous Proportional Prosthesis Control').pack(pady=(10,20))
         # Train Model Button
         Button(self.window, font=("Arial", 18), text = 'System Training', command=self.launch_training).pack(pady=(0,20))
-        # Visualize predictions
-        Button(self.window, font=("Arial", 18), text = 'Adjust Post-Training Parameters', command=self.adjust_param_callback).pack(pady=(0,20))
+        # Adjust Parameters Button -you can run the prosthesis here as well so probably should be called something else
+        Button(self.window, font=("Arial", 18), text = 'Adjust Post-Training Parameters and Run Prosthesis', command=self.adjust_param_callback).pack(pady=(0,20))
         # Run prosthesis
         #Button(self.window, font=("Arial", 18), text = 'Run Prosthesis', command=self.run_prosthesis).pack(pady=(0,20)) # Added 22.04. This may be in Parameter Adjustment -> try it out.
         # Start Isofitts
@@ -121,9 +123,11 @@ class ProsthesisControlGUI:
     def launch_training(self):
         self.window.destroy()
         if self.regression_selected():
-            args = {'media_folder': 'animation/', 'data_folder': Path('data', 'regression').absolute().as_posix(), 'rest_time': 3} 
+            self.training_media_folder = 'animation/test/saw_tooth/'
+            args = {'media_folder': self.training_media_folder, 'data_folder': Path('data', 'regression').absolute().as_posix(), 'rest_time': 3} 
         else:
-            args = {'media_folder': 'media/images/', 'data_folder': Path('data', 'classification').absolute().as_posix()}
+            self.training_media_folder = 'media/images/'
+            args = {'media_folder': self.training_media_folder, 'data_folder': Path('data', 'classification').absolute().as_posix()}
         
         training_ui = GUI(self.odh, args=args, width=1100, height=1000, gesture_height=700, gesture_width=700)
         #training_ui.download_gestures([1,2,3,6,7], "media/images/") # Downloading gestures from github repo. Videos for simultaneous gestures are located in images_master/videos
@@ -135,37 +139,21 @@ class ProsthesisControlGUI:
         self.window.destroy()
         if self.regression_selected(): # Trenger vel i utgpkt ikke disse, da de ikke brukes i ML_GUI? -> TODO: burde hente de i ML_GUI 
             #data_folder = Path('data', 'regression').absolute().as_posix()
-            data_folder = Path('data', 'regression',).as_posix()
+            data_folder = Path('data', 'regression').as_posix()
         else:
             data_folder = Path('data', 'classification').absolute().as_posix()
+        
         params = {'window_size':200, 'window_increment':100, 'deadband': 0., 'thr_angle_mf1': 45, 'thr_angle_mf2': 45, 'gain_mf1': 1, 'gain_mf2': 1} #deafult values for the parameters. 
         adjust_param_ui = ParameterAdjustmentGUI(online_data_handler=self.odh, 
                                                  regression_selected=self.regression_selected(), 
                                                  model_str=self.model_str.get(), 
                                                  axis_media=self.axis_media, 
-                                                 params=params, 
-                                                 training_data_folder=data_folder, 
-                                                 feature_list=self.feature_list, 
+                                                 params=params,                                                  
+                                                 training_data_folder=data_folder,
+                                                 training_media_folder=self.training_media_folder,
                                                  debug=True)
         adjust_param_ui.start_gui()
         self.initialize_ui() # When the user is done adjusting parameters, the GUI will be closed and the main menu will be re-opened.
-    
-    # NOTE! Do this later
-    def run_prosthesis(self): #NOTE! Take a look if you want this here or in parameter adjustment
-        pass
-    #     self.set_up_model()
-    #     self.window.destroy()
-    #     if self.regression_selected(): 
-    #         controller = RegressorController(ip=self.controller_IP, port=self.controller_PORT)
-    #     else:
-    #         controller = ClassifierController(ip=self.controller_IP, port=self.controller_PORT, output_format=self.predictor.output_format, num_classes=5) # NOTE! num_classes hardcoded -> get from config
-    
-    #     prosthesis = Prosthesis()
-    #     prosthesis.connect("COM3", baudrate=115200)
-    #     actuator_function = ActuatorFunctionSelector(prosthesis=prosthesis, controller=controller)
-    #     motor_setpoints = actuator_function.get_motor_setpoints()
-    #     if motor_setpoints is not None:
-    #         prosthesis.send_command(motor_setpoints)
 
     # Sourced from LibEMG Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git
     def start_test(self):
@@ -175,7 +163,7 @@ class ProsthesisControlGUI:
             controller = RegressorController(ip=self.controller_IP, port=self.controller_PORT) 
             save_file = Path('results', self.model_str.get() + '_reg' + ".pkl").absolute().as_posix()
         else:
-            controller = ClassifierController(ip=self.controller_IP, port=self.controller_PORT, output_format=self.predictor.output_format, num_classes=len(self.motor_functions)) # NOTE! num_classes hardcoded -> get from config
+            controller = ClassifierController(ip=self.controller_IP, port=self.controller_PORT, output_format=self.predictor.output_format, num_classes=len(self.motion_classes)) # NOTE! num_classes hardcoded -> get from config
             save_file = Path('results', self.model_str.get() + '_clf' + ".pkl").absolute().as_posix()
         
         config = FittsConfig(num_trials=16, save_file=save_file)
@@ -206,7 +194,7 @@ class ProsthesisControlGUI:
     # Gotten from LibEMG Menu.py. Used when doing Isofitts test.
     def set_up_model(self):
         """Sets up the model by checking for a configuration JSON file or creating a default one."""
-        config_file_path = Path('model_config.json')
+        config_file_path = Path('./post_training_parameters/parameters-adjustments.json')
 
         # Check if the configuration file exists
         if config_file_path.exists():
@@ -268,7 +256,7 @@ class ProsthesisControlGUI:
                 return False  # No matching motion found
 
             # Construct the expected metadata filename
-            expected_metadata_file = f"animation/{expected_metadata}.txt"
+            expected_metadata_file = f"animation/test/saw_tooth{expected_metadata}.txt"
 
             return metadata_file == expected_metadata_file
         
@@ -284,7 +272,7 @@ class ProsthesisControlGUI:
             ]
         if self.regression_selected():
             metadata_fetchers = [
-                FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map) ) #package_function=lambda x, y: True)
+                FilePackager(RegexFilter(left_bound='animation/test/saw_tooth', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map) ) #package_function=lambda x, y: True)
             ]
             labels_key = 'labels'
             metadata_operations = {'labels': 'last_sample'}
@@ -300,9 +288,8 @@ class ProsthesisControlGUI:
 
         # Step 2: Extract features from offline data
         fe = FeatureExtractor()
-        if self.feature_list is None:    
-            self.feature_list = fe.get_feature_groups()['HTD'] # Default feature list is HTD features.
-        training_features = fe.extract_features(self.feature_list, train_windows, array=True)
+        feature_list = fe.get_feature_groups()['HTD'] # Default feature list is HTD features.
+        training_features = fe.extract_features(feature_list, train_windows, array=True)
 
         # Step 3: Dataset creation
         data_set = {}
@@ -316,12 +303,12 @@ class ProsthesisControlGUI:
             emg_model = EMGRegressor(model=model)
             emg_model.fit(feature_dictionary=data_set)
             #emg_model.add_deadband(DEADBAND) # Add a deadband to the regression model. Value below this threshold will be considered 0.
-            self.predictor = OnlineEMGRegressor(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, self.odh, self.feature_list, std_out=True)
+            self.predictor = OnlineEMGRegressor(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, self.odh, feature_list, std_out=True)
         else:
             emg_model = EMGClassifier(model=model)
             emg_model.fit(feature_dictionary=data_set)
             emg_model.add_velocity(train_windows, train_metadata[labels_key])
-            self.predictor = OnlineEMGClassifier(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, self.odh, self.feature_list, output_format='probabilities', std_out=True)
+            self.predictor = OnlineEMGClassifier(emg_model, WINDOW_SIZE, WINDOW_INCREMENT, self.odh, feature_list, output_format='probabilities', std_out=True)
 
         # Step 5: Create online EMG model and start predicting.
         print('Model fitted and running!')
@@ -341,10 +328,10 @@ class ProsthesisControlGUI:
             Duration of the rest phase after each motion (in seconds).
         """
         fps = 24  # Frames per second for the animation
-        for mf, (x_factor, y_factor) in self.motor_functions.items(): # Now all movements are called motor functions, but are in fact only two motor functions and two combined movements.
-            output_filepath = Path(f'animation/collection_{mf}.mp4').absolute()
+        for motion_class, (x_factor, y_factor) in self.motion_classes.items(): # Called motion class but can include simultaneous motions as well.
+            output_filepath = Path(self.training_media_folder, f'{motion_class}.mp4').absolute() 
             if output_filepath.exists():
-                print(f'Animation file for {mf} already exists. Skipping creation.')
+                print(f'Animation file for {motion_class} already exists. Skipping creation.')
                 continue
 
             # Generate base movement
@@ -361,11 +348,6 @@ class ProsthesisControlGUI:
             x_coords = x_factor * base_motion
             y_coords = y_factor * base_motion
 
-            # Calculate angles (in radians) for the arrow animator
-            #angles = np.arctan2(y_coords, x_coords)
-            #angles = np.arctan2(y_factor, x_factor)
-            # Apply movement transformation
-            #coordinates = np.hstack((x_coords, y_coords, angles))  
             coordinates = np.stack((x_coords, y_coords), axis=1)
 
             #plotter = PredictionPlotter(self.axis_media_paths, real_time=False)
@@ -382,7 +364,7 @@ class ProsthesisControlGUI:
                                                     show_boundary=True, 
                                                     fps=fps
                                                     )# ,(tpd=5 this does not make any diffrence..)#, plot_line=True) # plot_line does not work
-            scatter_animator_x.save_plot_video(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, verbose=True)
+            scatter_animator_x.save_plot_video(coordinates, title=f'Regression Training - {motion_class}', save_coordinates=True, verbose=True)
             #arrow_animator = ArrowPlotAnimator(output_filepath=output_filepath.as_posix(), show_direction=True, show_countdown=True, axis_images=self.axis_media, figsize=(10,10), normalize_distance=True, show_boundary=True, tpd=2)#, plot_line=True) # plot_line does not work
             #arrow_animator.save_plot_video(coordinates, title=f'Regression Training - {mf}', save_coordinates=True, verbose=True)
 
