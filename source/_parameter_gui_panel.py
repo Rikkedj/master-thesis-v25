@@ -86,9 +86,12 @@ class ParameterAdjustmentPanel:
         self.gain_pronation = gain_pronation
         self.gain_supination = gain_supination
         self.gui = gui
+
+        self.offline_data_handler = None # This is the offline data handler that is used to get the data from the training data folder. It is set in set_up_model.
         self.training_data_folder = training_data_folder
         self.training_media_folder = training_media_folder
         self.model_str = gui.model_str # Initial model string, but can be changed in gui
+        self.active_channels = {} # This is a dictionary that will hold the active channels, i.e. the channels that are selected in the GUI. The keys are the channel numbers and the values are booleans.
 
         self.optional_features = FeatureExtractor().get_feature_list() #["MAV", "ZC", "WL", "MYOP",]
         self.optional_feature_groups = [fs for fs in FeatureExtractor().get_feature_groups().keys()] #["Time domain", "Frequency domain", "Time-frequency domain"]
@@ -165,7 +168,12 @@ class ParameterAdjustmentPanel:
                                             'gain_hand_close',
                                             'gain_pronation',
                                             'gain_supination',
-                                            'save_config_tag']
+                                            'save_config_tag'],
+                            "flutter_filter": [ 'flutter_filter_window',
+                                                'flutter_tanh_gain',
+                                                'flutter_gain',
+                                                'flutter_dt',
+                                                'flutter_filter_enabled']
                                            }                           
 
     def cleanup_window(self, window_name): # Don't really know what this does
@@ -177,6 +185,8 @@ class ParameterAdjustmentPanel:
     def spawn_configuration_window(self):
         self.cleanup_window("model_settings")
         self.cleanup_window("parameters")
+        self.cleanup_window("flutter_filter")
+
         #### WINDOW FOR MACHINE LEARNING MODEL SETTINGS ############
         with dpg.window(tag="model_adjustment_window",
                         label="ML Model Settings",
@@ -231,14 +241,8 @@ class ParameterAdjustmentPanel:
                                                     tag=feature,
                                                     default_value=False,
                                                     callback=self.update_ml_model_callback)
-                        # for feature in self.optional_features:
-                        #     dpg.add_checkbox(label=feature, 
-                        #                      tag=feature,
-                        #                      default_value=False,
-                        #                      callback=self.update_value_callback
-                        #                     )
-                            #self.selected_features[feature] = False # Initialize selected features
-                
+                                    #self.selected_features[feature] = False # Initialize selected features
+
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Feature sets: ")
                         with dpg.child_window(height=50, autosize_x=True, horizontal_scrollbar=True): # Make this a child window to make it scrollable
@@ -260,21 +264,78 @@ class ParameterAdjustmentPanel:
                                       width=200,
                                       callback=self.update_ml_model_callback
                                     )
-                                       
                         
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
-                        dpg.add_button(label="Visualize Offline Predictions", callback=self.visualize_offline_predictions)
-                    
-                    dpg.add_button(label="Visualize Raw EMG", callback=self.plot_raw_data_callback)
-                
+                        dpg.add_text(default_value="Active channels: ")
+                        with dpg.child_window(height=50, autosize_x=True, horizontal_scrollbar=True): # Make this a child window to make it scrollable
+                            with dpg.group(horizontal=True):
+                                for i in range(1, 17): # 16 channels
+                                    dpg.add_checkbox(label=f"Channel {i}", tag=f"channel_{i}", default_value=False, callback=self.update_channel_callback)
+
+                with dpg.table_row():
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Visualize Offline Predictions", callback=self.visualize_offline_predictions)       
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Visualize Offline EMG", callback=self.visualize_offline_emg_callback)
+                        dpg.add_button(label="Visualize Offline Features", callback=self.visualize_offline_features_callback)
+
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
                         dpg.add_button(label="Re-fit Model",
                                        width=len("Re-fit Model") * 15,
                                        callback=self.reset_model_callback
                                     )
-                    
+                        
+        # WINDOW FOR NONLINEAR DEAD-BAND FILTER (FLUTTER FILTER) SETTINGS ############
+        with dpg.window(tag="flutter_filter_window",
+                        label="Nonlinear Deadband Filter",
+                        width=400,
+                        height=300,
+                        pos=(0, 350)):
+            with dpg.table(header_row=False, resizable=True, policy=dpg.mvTable_SizingStretchProp,
+                     borders_outerH=True, borders_innerV=True, borders_innerH=True, borders_outerV=True):
+                dpg.add_table_column(label="")
+                with dpg.table_row():
+                    with dpg.group(horizontal=True):
+                        dpg.add_input_float(label="Tanh Gain",
+                            default_value=self.flutter_filter.tanh_gain, 
+                                            tag="flutter_tanh_gain",
+                                            width=100,
+                                            min_value=0.0,
+                                            max_value=40.0,
+                                            min_clamped=True,
+                                            max_clamped=True,
+                                            callback=self.flutter_filter_callback
+                                        )
+                    with dpg.group(horizontal=True):
+                        dpg.add_input_float(label="Gain",
+                                            default_value=self.flutter_filter.gain, 
+                                            tag="flutter_gain",
+                                            width=100,
+                                            min_value=0.0,
+                                            max_value=10.0,
+                                            min_clamped=True,
+                                            max_clamped=True,
+                                            callback=self.flutter_filter_callback
+                                        )
+                with dpg.table_row():
+                    with dpg.group(horizontal=True):
+                        dpg.add_input_float(label="dt (s) (for integrator)",
+                                            default_value=self.flutter_filter.dt, 
+                                            tag="flutter_dt",
+                                            width=100,
+                                            min_value=0.0,
+                                            max_value=1.0,
+                                            min_clamped=True,
+                                            max_clamped=True,
+                                            callback=self.flutter_filter_callback
+                                        )
+                    with dpg.group(horizontal=True):
+                        dpg.add_checkbox(label="Enable Filter",
+                                         tag="flutter_filter_enabled",
+                                         default_value=True
+                                        )
 
         #### WINDOW FOR POST-PREDICTION CONTROLLER SETTINGS ############
         with dpg.window(tag="parameter_adjustment_window",
@@ -303,7 +364,13 @@ class ParameterAdjustmentPanel:
                                             min_clamped=True,
                                             max_clamped=True,
                                             callback=self.update_post_pred_callback
-                                        )  
+                                        ) 
+                    with dpg.group(horizontal=True):
+                        dpg.add_text(default_value="")
+
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Visualize Real-Time EMG", callback=self.plot_raw_data_callback)
+
                 with dpg.table_row():
                     with dpg.group(horizontal=True):
                         dpg.add_text(default_value="Threshold angle mf1 (degrees): ")
@@ -442,8 +509,17 @@ class ParameterAdjustmentPanel:
         # Otherwise, default to ML model config
         self.ml_model_config[sender] = app_data
         print(self.ml_model_config)
-    
-    
+
+    def update_channel_callback(self, sender, app_data):
+        '''Updates the active channels list with the new values from the GUI.'''
+        # Check if the sender is a channel checkbox
+        channel_number = int(sender.split("_")[1])
+        if app_data: # If the checkbox is checked
+            self.active_channels[channel_number] = True
+        else:
+            self.active_channels[channel_number] = False
+        print(f"Active channels updated: {self.active_channels}")
+
     # def update_value_callback(self, sender, app_data):
     #     '''Updates the configuration dictionary with the new values from the GUI.'''
     #     if sender in self.post_pred_config.keys():
@@ -483,8 +559,52 @@ class ParameterAdjustmentPanel:
 
     def visualize_offline_predictions(self):
         self.get_settings() # Get the settings from the GUI
-        self.set_up_model(visualize=True)
+        self.set_up_model(visualize_preds=True)
 
+    def visualize_offline_emg_callback(self):
+        self.get_settings() # Get the settings from the GUI 
+        self.set_up_model()
+        # Prevent duplicate windows
+        if dpg.does_item_exist("offline_emg_popup"):
+            dpg.delete_item("offline_emg_popup")
+        # Create a popup window for visualizing offline EMG - to choose channels and repetitions
+        if not self.offline_data_handler:
+            print("No offline data found. Ensure you have recorded training data.")
+            return
+        
+        with dpg.window(tag="offline_emg_popup", label="Visualize Offline EMG", width=600, height=400):
+                dpg.add_text("Select repetitions:")
+                with dpg.child_window(height=150):
+                    for rep in range(self.num_reps):
+                        dpg.add_checkbox(label=f"Repetition {rep+1}", tag=f"rep_{rep}")
+
+                dpg.add_spacer(height=10)
+                dpg.add_text("Select classes:")
+            
+                with dpg.child_window(height=150):
+                    for class_idx in range(self.num_motions): # Num channels in training dataset. NOTE: Could be called something else
+                        dpg.add_checkbox(label=self.class_map[str(class_idx)], tag=f"class_idx_{class_idx}") 
+
+                dpg.add_spacer(height=10)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="OK", callback=self._visualize_emg_ok)
+                    dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item("offline_emg_popup"))
+    
+    def _visualize_emg_ok(self):
+        selected_reps = [i for i in range(self.num_reps) if dpg.get_value(f"rep_{i}")]
+        selected_class_nums = [i for i in range(self.num_motions) if dpg.get_value(f"class_idx_{i}")]
+        # Close popup window
+        dpg.delete_item("offline_emg_popup")
+        if not selected_reps or not selected_class_nums:
+            print("No repetitions or channels selected. Please select at least one repetition and one channel.")
+            return
+        plot_odh = self.offline_data_handler.isolate_data("classes", selected_class_nums)
+        plot_odh = plot_odh.isolate_data("reps", selected_reps)
+        plot_odh.visualize(block=False, title=f"Offline EMG Visualization for class(es): {[self.class_map[str(cls)] for cls in selected_class_nums]}")
+
+    def visualize_offline_features_callback(self):
+        self.get_settings() # Get the settings from the GUI
+        self.set_up_model(visualize_features=True)
 
     def prediction_btn_callback(self):
         if not (self.gui.online_data_handler and sum(list(self.gui.online_data_handler.get_data()[1].values()))):
@@ -494,7 +614,6 @@ class ParameterAdjustmentPanel:
         self.start_prediction_plot()
         #self.spawn_configuration_window() # NOTE! Not sure if this is needed here
         #self.cleanup_window("configuration") # TODO: check out this, can make some problems so that the program crashes        self.spawn_configuration_window()
-
 
     def run_prosthesis_callback(self):
         # Set up model and start the predictor
@@ -551,7 +670,12 @@ class ParameterAdjustmentPanel:
         # Only stop controller if plotting thread is not running
         if not self.plot_running:
             self.stop_controller()    
-        
+    
+    def flutter_filter_callback(self, sender, app_data):
+        """Updates the flutter filter configuration dictionary with the new values from the GUI."""
+        self.flutter_filter.update_settings({sender: app_data})
+        print(self.flutter_filter.__dict__)
+
     ## Callbacks for plotting raw EMG - from LibEMG
     def plot_raw_data_callback(self):
         self.visualization_thread = threading.Thread(target=self._run_visualization_helper)
@@ -574,13 +698,6 @@ class ParameterAdjustmentPanel:
         if file_path.suffix.lower() != ".json": 
             file_path = file_path.with_suffix(".json")
 
-        # Check if file exists
-        # if file_path.exists():
-        #     # Store path and ask for confirmation
-        #     self._pending_save_path = file_path
-        #     self._show_overwrite_confirmation_dialog(file_path)
-        # else:
-        #     # File doesn't exist, save directly
         self._save_configuration_to_file(file_path) # Always overwrite at this point
 
 
@@ -600,6 +717,9 @@ class ParameterAdjustmentPanel:
 
     # -------------- Helper functions for the callbacks ---------------------#
     def run_predictor(self):
+        """
+        Runs the online emg predictor model in a separate thread.
+        """
         if self.predictor is None and not self.predictor_running: # Could also just check if running-flag is False?
             self.get_settings()
             self.set_up_model()
@@ -607,7 +727,7 @@ class ParameterAdjustmentPanel:
             self.predictor_running = True
 
     def get_settings(self):
-        # Do I need this? This gets updated every time a change in gui happens
+        # Do I need this? This gets updated every time a change in gui happens. Training data and media folder does not get updated when written, so that needs to be done here for now.
         self.deadband_radius = float(dpg.get_value(item="deadband_radius"))
         self.gain_hand_open = float(dpg.get_value(item="gain_hand_open"))
         self.gain_hand_close = float(dpg.get_value(item="gain_hand_close"))
@@ -682,9 +802,12 @@ class ParameterAdjustmentPanel:
             pred = self.controller.get_data(["predictions"])
             if pred is not None: 
                 #filtered_pred = self.flutter_filter.filter(pred) # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.
-                filtered_pred = self.flutter_filter.filter(pred) # Filter prediction to reject fluttering
-                #print("Filtered prediction: ", filtered_pred)
-                pred_feedback = pred - filtered_pred # Feedback after removing the filtered prediction
+                if self.flutter_filter and dpg.get_value("flutter_filter_enabled"):
+                    filtered_pred = self.flutter_filter.filter(pred) # Filter prediction to reject fluttering
+                    pred_feedback = pred - filtered_pred # Feedback after removing the filtered prediction
+                else:
+                    pred_feedback = pred # If the filter is not enabled, just use the prediction as feedback
+                #print("Filtered prediction: ", filtered_pred)   
                 #print("Pred after flutter filter: ", pred_new)
                 pred_controlled = self.pred_controller.update_prediction(pred_feedback) # Apply gain and deadband to the prediction
                 #print("Pred after post prediction controller: ", pred_new)
@@ -698,13 +821,17 @@ class ParameterAdjustmentPanel:
             print("Socket closed")
                 
     
-    def set_up_model(self, visualize: bool = False):
+    def set_up_model(self, visualize_preds: bool = False, visualize_features: bool = False):
         """
-        Sets up the model for the predictor. This includes loading the training data, extracting features, and fitting the machine learning model.
+        Sets up the model for the predictor. This includes loading the training data, extracting features, and fitting the machine learning model. 
+        NOTE: This is a bit redundant if if experementing much with offline data, since it will load the training data every time this is called -> could be optimized later. 
+        
         Parameters
         ----------
-        visualize: bool, default=False
+        visualize_preds: bool, default=False
             If True, a plot of the offline prediction stream from the training data will be shown. 
+        visualize_features: bool, default=False
+            If True, a plot of the offline features extracted from the training data will be shown. 
         """
         # Read collection details from JSON file, storing pre-training metadata
         collection_file_path = os.path.join(self.training_data_folder, 'collection_details.json')
@@ -725,7 +852,7 @@ class ParameterAdjustmentPanel:
             """
             Ensures the correct animation metadata file is matched with the correct EMG data file.
 
-            Args:
+            Parameters:
                 metadata_file (str): Metadata file path (e.g., "animation/collection_hand_open_close.txt").
                 data_file (str): EMG data file path (e.g., "data/regression/C_0_R_1_emg.csv").
                 class_map (dict): Dictionary mapping class index (str) to motion filenames.
@@ -748,7 +875,6 @@ class ParameterAdjustmentPanel:
                 return False  # No matching motion found
 
             # Construct the expected metadata filename
-
             #expected_metadata_file = f"animation/test/saw_tooth/{expected_metadata}.txt"
             expected_metadata_file = str(self.training_media_folder)+f"{expected_metadata}.txt"
 
@@ -775,18 +901,37 @@ class ParameterAdjustmentPanel:
             labels_key = 'classes'
             metadata_operations = None
 
-        offline_data_handler = OfflineDataHandler()
-        offline_data_handler.get_data('./', regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
+        # Create an OfflineDataHandler instance to handle the offline data
+        self.offline_data_handler = OfflineDataHandler()
+        self.offline_data_handler.get_data('./', regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
         
-        train_windows, train_metadata = offline_data_handler.parse_windows(self.window_size, self.window_increment, metadata_operations=metadata_operations)
+        self.num_training_channels = self.offline_data_handler.data[0].shape[1] # Get the number of channels from the data
+        print(f"Number of channels in the training data: {self.num_training_channels}")
+        active_channels = [channel-1 for channel, is_active in self.active_channels.items() if is_active] # Get the active channels from the GUI
+        if active_channels: # Only isolate channels if there are active channels. Else it will use all channels.
+            if len(active_channels) > self.num_training_channels:
+                raise ValueError(f"Number of active channels ({len(active_channels)}) exceeds the number of channels in the data ({self.num_training_channels}). Please check your settings.")
+            self.offline_data_handler = self.offline_data_handler.isolate_channels(active_channels) # Isolate the active channels
+
+        # Parse the windows from the offline data
         
+        train_windows, train_metadata = self.offline_data_handler.parse_windows(self.window_size, self.window_increment, metadata_operations=metadata_operations)
+
         # Step 2: Extract features from offline data
         fe = FeatureExtractor()
         print("Extracting features")
         selected_feature_list = [feature for feature, is_selected in self.selected_features.items() if is_selected]
+        if not selected_feature_list:
+            print("No features selected for extraction. HTD is selected by default.")
+            selected_feature_list = fe.get_feature_groups()['HTD'] # Default to HTD features if no features are selected
+                    
         training_features = fe.extract_features(selected_feature_list, train_windows, array=True)
+        if visualize_features:
+           training_features_dict = fe.extract_features(selected_feature_list, train_windows, array=False) # Extract features from the training data. A bit reducant to do it twice, but this is for visualization purposes.
+           fe.visualize(training_features_dict, block=False)
+           return # Exit here if only visualizing features
 
-        # Step 3: Dataset creation
+        # Step 3: Dataset creation for EMG model training
         data_set = {}
         print("Creating dataset")
         data_set['training_features'] = training_features
@@ -801,26 +946,32 @@ class ParameterAdjustmentPanel:
             # Regression
             emg_model = EMGRegressor(model=self.model_str)
             emg_model.fit(feature_dictionary=data_set)
-            if visualize:
-                train_labels = train_metadata[labels_key]
-                preds = emg_model.run(training_features)
-                emg_model.visualize(train_labels, preds)
-            #emg_model.add_deadband_radius(self.deadband_radius) # Add a deadband_radius to the regression model. Value below this threshold will be considered 0.
             self.predictor = OnlineEMGRegressor(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, selected_feature_list, ip=self.UDP_IP, port=self.UDP_PORT, std_out=False)
+            if visualize_preds:
+                mf_labels = [{1:"Hand Open", -1:"Hand Close"}, {1:"Pronation", -1:"Supination"}] # NOTE: This is a hardcoded mapping for the motor functions, so my plot get nice for report.
+                mf_titles = ["Hand Open/Close", "Pronation/Supination"] # This is a hardcoded mapping for the motor functions, so my plot get nice for report.
+                train_labels = train_metadata[labels_key]
+                preds = emg_model.run(training_features)                
+                preds_tresh = [self.pred_controller.update_prediction(pred) for pred in preds] # Add gain and deadband to the predictions
+                preds_tresh = np.squeeze(np.array(preds_tresh))  # Removes dimensions of size 1
+                emg_model.visualize(train_labels, preds_tresh, mf_labels_dict=mf_labels, dof_titles=mf_titles)
         else:
             # Classification
-            model = dpg.get_value(item="classifier_model") # TODO: Can add this to self.model_str when setting settings
-            emg_model = EMGClassifier(model=model)
+            emg_model = EMGClassifier(model=self.model_str)
             emg_model.fit(feature_dictionary=data_set)
             #emg_model.add_velocity(train_windows, train_metadata[labels_key])
             self.predictor = OnlineEMGClassifier(emg_model, self.window_size, self.window_increment, self.gui.online_data_handler, selected_feature_list, output_format='probabilities', ip=self.UDP_IP, port=self.UDP_PORT)
+            if visualize_preds:
+                train_labels = train_metadata[labels_key]
+                preds, probs = emg_model.run(training_features)
+                emg_model.visualize(train_labels, preds, probs) # Visualize the predictions and probabilities
         # Step 5: Create online EMG model and start predicting.
-        print('Model fitted!')  
-           
+        print('Model fitted!')            
+
     def _run_visualization_helper(self):
         self.gui.online_data_handler.visualize(block=False)
 
-    
+
 
 # Change this to be defined somewhere else, but for testing its here
 SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff']
@@ -828,6 +979,7 @@ SUPPORTED_VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv', '.wmv']
 class PredictionPlotter:
     '''
     The Prediction Plotter class.
+
     Parameters
     ----------
     axis_media: dict, default=None
@@ -1136,49 +1288,6 @@ class PredictionPlotter:
 
         print("Resources released.")
 
-    # ########## Got from LibEMG (CartesianPlotAnimator in animator.py)  #################  
-    # def _format_figure(self):
-    #     max_range = self._calculate_range()
-    #     axis_limits = (-max_range*2, max_range*2)
-    #     if self.axis_images is not None:
-    #         #self.ax.axis('off')  # hide default axis
-    #         # Make 3 x 3 grid
-    #         grid_shape = (3, 3)
-    #         gs = self.fig.add_gridspec(grid_shape[0], grid_shape[1], width_ratios=[1, 2, 1], height_ratios=[1, 2, 1])
-
-    #         # Create subplots using the gridspec
-    #         axs = np.empty(shape=grid_shape, dtype=object)
-    #         for row_idx in range(grid_shape[0]):
-    #             for col_idx in range(grid_shape[1]):
-    #                 ax = plt.subplot(gs[row_idx, col_idx])
-    #                 if (row_idx, col_idx) != (1, 1):
-    #                     # Disable axis for figures/, not for main plot
-    #                     ax.axis('off')
-    #                 axs[row_idx, col_idx] = ax
-
-    #         loc_axis_map = {
-    #             'NW': axs[0, 0],
-    #             'N': axs[0, 1],
-    #             'NE': axs[0, 2],
-    #             'W': axs[1, 0],
-    #             'E': axs[1, 2],
-    #             'SW': axs[2, 0],
-    #             'S': axs[2, 1],
-    #             'SE': axs[2, 2]
-    #         }
-    #         for loc, image in self.axis_images.items():
-    #             self.ax = loc_axis_map[loc]
-    #             self.ax.imshow(image)
-    #         # Set main axis so icon is drawn correctly
-    #         plt.sca(axs[1, 1])    
-    #         self.ax = axs[1, 1]
-        
-    #     ticks = [-1., -0.5, 0, 0.5, 1.]
-    #     plt.xticks(ticks)
-    #     plt.yticks(ticks)
-    #     plt.axis('equal')
-    #     self.ax.set(xlim=axis_limits, ylim=axis_limits)
-    #     #return fig, ax
     
     @staticmethod
     def _add_image_label_axes(fig: Figure):

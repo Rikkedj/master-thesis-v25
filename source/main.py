@@ -88,14 +88,14 @@ class ProsthesisControlGUI:
         else:
             self.model_str = StringVar(value=self.model_str.get())
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.window.title("Game Menu")
-        self.window.geometry("800x800") # Changed the size
+        self.window.title("Main Menu")
+        self.window.geometry("800x800") 
 
         # Label 
         Label(self.window, font=("Arial bold", 20), text = 'Simultaneous Proportional Prosthesis Control').pack(pady=(10,20))
         # Train Model Button
         Button(self.window, font=("Arial", 18), text = 'System Training', command=self.launch_training).pack(pady=(0,20))
-        # Adjust Parameters Button -you can run the prosthesis here as well so probably should be called something else
+        # Post Training
         Button(self.window, font=("Arial", 18), text = 'Adjust Post-Training Parameters and Run Prosthesis', command=self.adjust_param_callback).pack(pady=(0,20))
         # Run prosthesis
         #Button(self.window, font=("Arial", 18), text = 'Run Prosthesis', command=self.run_prosthesis).pack(pady=(0,20)) # Added 22.04. This may be in Parameter Adjustment -> try it out.

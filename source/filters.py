@@ -118,6 +118,8 @@ class FlutterRejectionFilter:
             If True, the filter will include an integrator to smooth the output.
         gain (float): 
             Gain applied to the output to scale the response.
+        k (float):
+
         """
         self.tanh_gain = tanh_gain
         self.dt = dt
@@ -126,7 +128,21 @@ class FlutterRejectionFilter:
         self.gain = gain
         self.k = k
 
+    def update_settings(self, kwargs):
+        """
+        Update the filter settings dynamically.
 
+        Parameters:
+        -------------
+        kwargs: dict
+            Dictionary of parameters to update. Valid keys are 'tanh_gain', 'dt', 'integrator_enabled', 'gain', and 'k'.
+        """
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise AttributeError(f"'{key}' is not a valid filter parameter.")
+            
     ## Updated version of filter
     def reset_integrator(self):
         """ Reset the filter state to zero. """
