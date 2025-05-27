@@ -1,5 +1,5 @@
 from libemg.environments.controllers import RegressorController, ClassifierController
-from libemg.prosthesis import Prosthesis, MotorFunctionSelector
+from libemg.prosthesis import Prosthesis
 
 import numpy as np
 from queue import Queue
@@ -140,63 +140,72 @@ if __name__ == "__main__":
     UDP_PORT = 5005
     PLOT_WINDOW_SIZE = 100
 
-    regression_selected = True
-    if regression_selected:
-        controller = RegressorController(ip=UDP_IP, port=UDP_PORT)
-    else:
-        controller = ClassifierController(output_format='predictions', ip=UDP_IP, port=UDP_PORT)
+    prost = Prosthesis()
+    
+    prost.connect(port="COM9", baudrate=115200, timeout=1)  # Change this to the correct port and baudrate for your prosthesis
+    prost.send_command([0,255,0,0])
+    #prost.send_command([0,150,0,0])
+    time.sleep(1)  # Wait for the prosthesis to initialize
+    prost.send_command([0,0,0,0])
+
+
+    # regression_selected = True
+    # if regression_selected:
+    #     controller = RegressorController(ip=UDP_IP, port=UDP_PORT)
+    # else:
+    #     controller = ClassifierController(output_format='predictions', ip=UDP_IP, port=UDP_PORT)
         
-    pred_queue = Queue()
+    # pred_queue = Queue()
 
-    flutter_filter = FlutterRejectionFilter(k=5.0, integrator_enabled=True, dt=0.1) # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.            
-    mf_selector = MotorFunctionSelector() # This is the motor function selector that is used to select the motor functions that are used for the prosthesis. It is not used in the current version of the code, but it is here for future use.
-    prosthesis = Prosthesis()
-    prosthesis.connect(port="COM9", baudrate=115200, timeout=1) # Change this to the correct port and baudrate for your prosthesis
+    # flutter_filter = FlutterRejectionFilter(k=5.0, integrator_enabled=True, dt=0.1) # This is the filter that is used to filter the predictions from the model. It is a nonlinear filter that is used to remove noise from the predictions. It is not used in the current version of the code, but it is here for future use.            
+    # mf_selector = MotorFunctionSelector() # This is the motor function selector that is used to select the motor functions that are used for the prosthesis. It is not used in the current version of the code, but it is here for future use.
+    # prosthesis = Prosthesis()
+    # prosthesis.connect(port="COM9", baudrate=115200, timeout=1) # Change this to the correct port and baudrate for your prosthesis
     
-    stop_event = threading.Event()
-    pred_thread = threading.Thread(target=run_controller, args=(controller, pred_queue, stop_event))
-    pred_thread.start()
+    # stop_event = threading.Event()
+    # pred_thread = threading.Thread(target=run_controller, args=(controller, pred_queue, stop_event))
+    # pred_thread.start()
 
-    command_thread = threading.Thread(target=send_command_to_prosthesis, args=(prosthesis, mf_selector, pred_queue, stop_event))
-    command_thread.start()
+    # command_thread = threading.Thread(target=send_command_to_prosthesis, args=(prosthesis, mf_selector, pred_queue, stop_event))
+    # command_thread.start()
     
 
-    ######## PLOT PREDICITONS LIVE ########
-    plot_data = deque([0.0] * PLOT_WINDOW_SIZE, maxlen=PLOT_WINDOW_SIZE)
-    # Setup live plot
-    fig, ax = plt.subplots()
-    line, = ax.plot(range(PLOT_WINDOW_SIZE), list(plot_data))
-    ax.set_ylim(-1, 1)  # Adjust based on expected prediction range
-    ax.set_title("Live Filtered Predictions")
-    ax.set_xlabel("Time step")
-    ax.set_ylabel("Prediction")
+    # ######## PLOT PREDICITONS LIVE ########
+    # plot_data = deque([0.0] * PLOT_WINDOW_SIZE, maxlen=PLOT_WINDOW_SIZE)
+    # # Setup live plot
+    # fig, ax = plt.subplots()
+    # line, = ax.plot(range(PLOT_WINDOW_SIZE), list(plot_data))
+    # ax.set_ylim(-1, 1)  # Adjust based on expected prediction range
+    # ax.set_title("Live Filtered Predictions")
+    # ax.set_xlabel("Time step")
+    # ax.set_ylabel("Prediction")
 
-    def polling_pred_queue():
-        """Fetch from pred_queue to update plot_data continuously."""
-        while not stop_event.is_set():
-            if not pred_queue.empty():
-                val = pred_queue.get()
-                # Support both scalar and list predictions
-                if isinstance(val, (list, tuple)):
-                    val = val[0]
-                plot_data.append(val)
-            else:
-                time.sleep(0.01)
+    # def polling_pred_queue():
+    #     """Fetch from pred_queue to update plot_data continuously."""
+    #     while not stop_event.is_set():
+    #         if not pred_queue.empty():
+    #             val = pred_queue.get()
+    #             # Support both scalar and list predictions
+    #             if isinstance(val, (list, tuple)):
+    #                 val = val[0]
+    #             plot_data.append(val)
+    #         else:
+    #             time.sleep(0.01)
 
-    polling_thread = threading.Thread(target=polling_pred_queue)
-    polling_thread.start()
+    # polling_thread = threading.Thread(target=polling_pred_queue)
+    # polling_thread.start()
 
-    ani = animation.FuncAnimation(fig, update_plot, fargs=(plot_data, line), interval=100)
+    # ani = animation.FuncAnimation(fig, update_plot, fargs=(plot_data, line), interval=100)
 
-    try:
-        plt.show()  # This blocks until the plot window is closed
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print("Stopping the controller...")
-        stop_event.set()
-        pred_thread.join()
-        command_thread.join()
-        prosthesis.disconnect()
-        polling_thread.join()
-        print("Controller stopped.")
+    # try:
+    #     plt.show()  # This blocks until the plot window is closed
+    # except KeyboardInterrupt:
+    #     pass
+    # finally:
+    #     print("Stopping the controller...")
+    #     stop_event.set()
+    #     pred_thread.join()
+    #     command_thread.join()
+    #     prosthesis.disconnect()
+    #     polling_thread.join()
+    #     print("Controller stopped.")

@@ -107,8 +107,8 @@ if __name__ == '__main__':
     else:
         data_folder = "data/classification/"
 
-    data_folder = "data/regression/19-05-new/"
-    json_path = os.path.join('./', data_folder, "collection_details.json")
+    data_folder = "data/regression/22-05/anders"
+    json_path = os.path.join('.', data_folder, "collection_details.json")
 
     with open(json_path, 'r') as f:
         collection_details = json.load(f)
@@ -120,7 +120,7 @@ if __name__ == '__main__':
     
     regex_filters = [
             RegexFilter(
-                left_bound = os.path.join(data_folder, "C_"),
+                left_bound = f"{data_folder}/C_",
                 right_bound = "_R",
                 values = [str(i) for i in range(num_motions)],
                 description = 'classes'
@@ -142,13 +142,16 @@ if __name__ == '__main__':
         metadata_fetchers = None
         labels_key = 'classes'
         metadata_operations = None
-         
+
+    active_classes = [2] #[0,1,2,4] # Hand open, hand close, pronation, supination
     offline_dh = OfflineDataHandler()
     offline_dh.get_data('./',regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
     #offline_dh.visualize()    offline_dh_c = OfflineDataHandler()
-    odh_ex_rest = offline_dh.isolate_data("classes", [0,1,2,4])
-
+    odh_ex_rest = offline_dh.isolate_data("classes", active_classes) # Isolate the data for the active classes
+    class_names = {int(c): class_map[str(c)].replace("collection_", "").replace("_", " ") for c in active_classes}
+    #class_names = {class_names[c].replace("collection_", "").replace("_", " ") for c in class_names}  # Replace underscores with spaces for better readability
     
+    odh_ex_rest.visualize_classes(class_names=class_names, recording_time=6) # Visualize the isolated data
     #train_odh= offline_dh.isolate_data("reps", [0,1,2])
     #test_odh = offline_dh.isolate_data("reps", [3,4])
     train_odh = odh_ex_rest.isolate_data("reps", [0,1,2])
@@ -160,14 +163,18 @@ if __name__ == '__main__':
     fe = FeatureExtractor()
     print("Extracting features")
     feature_list = fe.get_feature_list()
-    #desired_features = ["MAV", "ZC", "WL", "MYOP"] # The same used in Fougner 2012
-    #feature_list = [f for f in feature_list if f in desired_features]
+    desired_features = ["MAV", "ZC", "WL", "MYOP"] # The same used in Fougner 2012
+    feature_list = [f for f in feature_list if f in desired_features]
     feature_list = fe.get_feature_groups()['HTD'] # Make this chosen from the GUI later
     
     training_features = fe.extract_features(feature_list, train_windows, array=True)
     test_features = fe.extract_features(feature_list, test_windows, array=True)
     test_labels = test_metadata[labels_key]
-
+    
+    visualize_features = True # Set to True to visualize the features, False to skip visualization
+    if visualize_features == True:
+        feat_dict = fe.extract_features(feature_list, train_windows, array=False)
+        fe.visualize(feat_dict, class_names=class_names)
     # Step 3: Dataset creation
     data_set = {}
     print("Creating dataset")

@@ -292,7 +292,7 @@ class ParameterAdjustmentPanel:
                         label="Nonlinear Deadband Filter",
                         width=400,
                         height=300,
-                        pos=(0, 350)):
+                        pos=(1200, 0)):
             with dpg.table(header_row=False, resizable=True, policy=dpg.mvTable_SizingStretchProp,
                      borders_outerH=True, borders_innerV=True, borders_innerH=True, borders_outerV=True):
                 dpg.add_table_column(label="")
@@ -308,6 +308,7 @@ class ParameterAdjustmentPanel:
                                             max_clamped=True,
                                             callback=self.flutter_filter_callback
                                         )
+                with dpg.table_row():
                     with dpg.group(horizontal=True):
                         dpg.add_input_float(label="Gain",
                                             default_value=self.flutter_filter.gain, 
@@ -331,6 +332,7 @@ class ParameterAdjustmentPanel:
                                             max_clamped=True,
                                             callback=self.flutter_filter_callback
                                         )
+                with dpg.table_row():
                     with dpg.group(horizontal=True):
                         dpg.add_checkbox(label="Enable Filter",
                                          tag="flutter_filter_enabled",
@@ -928,7 +930,7 @@ class ParameterAdjustmentPanel:
         training_features = fe.extract_features(selected_feature_list, train_windows, array=True)
         if visualize_features:
            training_features_dict = fe.extract_features(selected_feature_list, train_windows, array=False) # Extract features from the training data. A bit reducant to do it twice, but this is for visualization purposes.
-           fe.visualize(training_features_dict, block=False)
+           fe.visualize(training_features_dict, class_names=self.class_map, block=False)
            return # Exit here if only visualizing features
 
         # Step 3: Dataset creation for EMG model training
