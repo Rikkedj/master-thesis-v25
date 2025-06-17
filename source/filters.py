@@ -64,6 +64,7 @@ class PostPredictionController:
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
+                print(f"Updated {key} to {value} in PostPredictionController.")
             else:
                 raise AttributeError(f"'{key}' is not a valid configuration parameter.")
 
@@ -94,7 +95,8 @@ class PostPredictionController:
 
         Returns:
         -------------
-        list: The updated prediction signal.
+        list: 
+            The updated prediction signal.
         """
         # Apply gain
         prediction = self.apply_gains(prediction)
@@ -104,7 +106,7 @@ class PostPredictionController:
         return prediction
 
 class FlutterRejectionFilter:
-    def __init__(self, tanh_gain=0.5, dt=0.01, integrator_enabled=False, gain=1.0, k=0.0):
+    def __init__(self, tanh_gain=0.5, dt=0.01, integrator_enabled=False, gain=1.0):
         """
         Nonlinear flutter rejection filter with gain, deadband and optional integrator
 
@@ -126,9 +128,9 @@ class FlutterRejectionFilter:
         self.integrator_enabled = integrator_enabled
         self.state = None # Initialize the state for the integrator
         self.gain = gain
-        self.k = k
+   
 
-    def update_settings(self, kwargs):
+    def update_settings(self, **kwargs):
         """
         Update the filter settings dynamically.
 
@@ -140,6 +142,7 @@ class FlutterRejectionFilter:
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
+                print(f"Updated {key} to {value} in FlutterRejectionFilter.")
             else:
                 raise AttributeError(f"'{key}' is not a valid filter parameter.")
             
@@ -154,7 +157,7 @@ class FlutterRejectionFilter:
         if self.state is None:
             self.state = np.zeros_like(x)
 
-        nonlinear_output = (np.abs(x)-self.k) * np.tanh(self.tanh_gain * x)
+        nonlinear_output = (np.abs(x)) * np.tanh(self.tanh_gain * x)
         self.state += nonlinear_output * self.dt
         
         if self.integrator_enabled:
@@ -162,3 +165,17 @@ class FlutterRejectionFilter:
         else:
             return self.gain*nonlinear_output
     
+    def get_settings(self):
+        """
+        Get the current settings of the filter.
+
+        Returns:
+        -------------
+        dict: A dictionary containing the current settings of the filter.
+        """
+        return {
+            'tanh_gain': self.tanh_gain,
+            'dt': self.dt,
+            'integrator_enabled': self.integrator_enabled,
+            'gain': self.gain
+        }

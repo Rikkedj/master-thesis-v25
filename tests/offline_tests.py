@@ -9,7 +9,119 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
+from matplotlib import colormaps as cm
+
 from pathlib import Path
+
+
+def plot_emg_data_and_features(raw_data, features_dict, class_names_dict, window_size, window_increment, sampling_rate=2000, save_path=None, savefig=False):
+    """
+    Plot EMG raw data and extracted features, color-coded by class.
+    
+    Parameters:
+    ----------
+    raw_data: list
+        list of ndarray of shape (samples, channels) of one segment of EMG data. This could be a repetition done in the system training.
+        ex: [ np.array([[0.1, 0.2], [0.15, 0.25], ..., n_samples]), np.array([[0.3, 0.4], [0.35, 0.45], ..., n_samples]), ..., n_segments ] 
+    
+    features_dict: dict
+        dictionary where each key is a feature name and the value is a numpy array of shape (num_windows, num_channels).
+        ex: { "MAV": np.array([[0.1, 0.2], [0.15, 0.25], ..., n_windows]), "RMS": np.array([[0.3, 0.4], [0.35, 0.45], ..., n_windows]) }
+    
+    class_names: dict 
+        Dictionary where keys are name of the class, and values are a list of the corresponding data segments in raw_data.
+        ex: { "hand_open": [0, 1, 2], "hand_close": [3, 4, 5] } given raw_data = [segment_0, segment_1, ..., segment_6]
+    sampling_rate: int
+        samples per second for raw_data (default: 2000 Hz)
+    """
+    total_num_segments = len(raw_data) # The number of segments, in our case the number of repetitions in system training
+    num_samples, num_channels = raw_data[0].shape
+    num_features = len(features_dict)
+
+    cmap = cm.get_cmap('Pastel1')  # or 'tab10', 'Set2', etc.
+    fmap = cm.get_cmap('tab10')  # Feature colors, can be customized
+    class_names = list(class_names_dict.keys())
+    class_colors = [cmap(i) for i in range(len(class_names_dict))]
+    class_colors = dict(zip(class_names, class_colors))
+    feature_colors = [fmap(i + 1) for i in range(num_features)]  # Colors for features, can be customized
+    # Create figure with subplots
+    fig, axs = plt.subplots(num_features + 1, num_channels, figsize=(15, 3 * (num_features + 1)), sharex=True)
+    fig.suptitle("EMG and Features Visualization", fontsize=16)  # Title for the entire figure
+
+    # Plot raw data with background shading by class
+    ax_emg = axs[0]
+    ax_emg[0].set_ylabel("EMG")
+
+    # Track time
+    current_time = 0
+    class_patches = []
+    # --- Global y-limits ---
+    emg_global_min, emg_global_max = float('inf'), float('-inf')
+    feature_global_minmax = {f_name: [float('inf'), float('-inf')] for f_name in features_dict}
+
+    for emg_segment_data in raw_data:
+        emg_global_min = min(emg_global_min, emg_segment_data.min())
+        emg_global_max = max(emg_global_max, emg_segment_data.max())
+
+    for f_name, f_data in features_dict.items():
+        feature_global_minmax[f_name][0] = min(feature_global_minmax[f_name][0], f_data.min())
+        feature_global_minmax[f_name][1] = max(feature_global_minmax[f_name][1], f_data.max())
+
+    for segment_idx, emg_segment_data in enumerate(raw_data):
+        num_samples_segment = emg_segment_data.shape[0]
+        duration_segment = num_samples_segment / sampling_rate
+        t_emg = np.linspace(current_time, current_time + duration_segment, num_samples_segment)
+        # Determine class label for this repetition
+        class_label = next((cls for cls, reps in class_names_dict.items() if segment_idx in reps), "Unknown")
+        color = class_colors.get(class_label, (0.5, 0.5, 0.5, 0.2))  # fallback gray
+        # Shade background for class
+        
+        for ch in range(num_channels):
+            ax_emg[ch].plot(t_emg, emg_segment_data[:, ch], label=f"Ch {ch+1}", linewidth=0.8, color="steelblue") # + ch * 300
+            ax_emg[ch].axvspan(current_time, current_time + duration_segment, color=color, alpha=0.1)
+            ax_emg[ch].set_ylim(emg_global_min*1.01, emg_global_max*1.01)  # Set global y-limits for EMG
+            ax_emg[ch].set_title(f"Ch {ch+1}")
+       
+
+        for idx, (f_name, f_data) in enumerate(features_dict.items()):
+            tot_windows = f_data.shape[0]
+            n_windows_per_segment = tot_windows // total_num_segments
+            #n_windows_current_segment = int(round((num_samples_segment - window_size) / window_increment + 1))
+            samples_per_segment = n_windows_per_segment * window_increment + window_size
+            t_feat = current_time + np.arange(tot_windows) * window_increment / sampling_rate + (window_size / (2 * sampling_rate)) # Center the feature windows in time, i.e. chooese the feature to be at the center of the window
+            t_current_feat = current_time + np.arange(n_windows_per_segment) * window_increment / sampling_rate + (window_size / (2 * sampling_rate))
+
+            for ch in range(num_channels):
+                axs[idx + 1][ch].plot(t_current_feat, f_data[segment_idx*n_windows_per_segment:(segment_idx+1)*n_windows_per_segment, ch], label=f"Ch {ch+1}" if segment_idx == 0 else "", alpha=0.8, color=feature_colors[idx])
+                axs[idx + 1][ch].axvspan(current_time, current_time + duration_segment, color=color, alpha=0.1)
+                axs[idx + 1][ch].set_ylim(feature_global_minmax[f_name][0]*1.01, feature_global_minmax[f_name][1]*1.01)  # Set global y-limits for features
+                axs[-1][ch].set_xlabel("Time (s)")
+
+            axs[idx + 1][0].set_ylabel(f_name)
+            
+        current_time += duration_segment  # Update current time for next segment
+
+     # Add legend for classes in upper right outside the plot
+    for cls, col in class_colors.items():
+        class_patches.append(mpatches.Patch(color=col, label=cls))
+
+    # Place legend outside the figure area (top right)
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.9)  # Adjust top margin to make space for the legend and title
+    fig.legend(handles=class_patches, 
+               loc='upper right', 
+               bbox_to_anchor=(0.85, 1.0), 
+               ncol=len(class_patches), 
+               borderaxespad=0.5, 
+               title="Class labels")
+
+    if save_path and savefig is True:
+        save_path = Path(save_path)
+        # Ensure save_path exists, creating it if needed
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, bbox_inches='tight', dpi=300)
+        
+    plt.show()
 
 class FlutterRejectionFilter:
     """
@@ -87,7 +199,7 @@ def _match_metadata_to_data(metadata_file: str, data_file: str, class_map: dict)
                 return False  # No matching motion found
 
             # Construct the expected metadata filename
-            expected_metadata_file = f"animation/{expected_metadata}.txt"
+            expected_metadata_file = f"animation/saw_tooth/{expected_metadata}.txt"
 
             return metadata_file == expected_metadata_file
 
@@ -107,7 +219,7 @@ if __name__ == '__main__':
     else:
         data_folder = "data/classification/"
 
-    data_folder = "data/regression/22-05/anders"
+    data_folder = "data/regression/separated-motions/s1-02-06-constrained"
     json_path = os.path.join('.', data_folder, "collection_details.json")
 
     with open(json_path, 'r') as f:
@@ -134,7 +246,7 @@ if __name__ == '__main__':
         ]
     if regression_selected:
         metadata_fetchers = [
-            FilePackager(RegexFilter(left_bound='animation/', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map)) 
+            FilePackager(RegexFilter(left_bound='animation/saw_tooth/', right_bound='.txt', values=motion_names, description='labels'), package_function=lambda meta, data: _match_metadata_to_data(meta, data, class_map)) 
         ]
         labels_key = 'labels'
         metadata_operations = {'labels': 'last_sample'}
@@ -143,19 +255,28 @@ if __name__ == '__main__':
         labels_key = 'classes'
         metadata_operations = None
 
-    active_classes = [2] #[0,1,2,4] # Hand open, hand close, pronation, supination
+    active_classes = [0,1,2,3,4 ] #[0,1,2,4] # Hand open, hand close, pronation, supination
     offline_dh = OfflineDataHandler()
     offline_dh.get_data('./',regex_filters, metadata_fetchers=metadata_fetchers, delimiter=",")
+    
     #offline_dh.visualize()    offline_dh_c = OfflineDataHandler()
     odh_ex_rest = offline_dh.isolate_data("classes", active_classes) # Isolate the data for the active classes
     class_names = {int(c): class_map[str(c)].replace("collection_", "").replace("_", " ") for c in active_classes}
+    class_name_to_segments = {name: [] for name in class_names.values()}    
     #class_names = {class_names[c].replace("collection_", "").replace("_", " ") for c in class_names}  # Replace underscores with spaces for better readability
-    
-    odh_ex_rest.visualize_classes(class_names=class_names, recording_time=6) # Visualize the isolated data
+    offline_dh.visualize_classes(class_names=class_names, recording_time=4, title="Offline Training EMG-data: S1")
+    #odh_ex_rest.visualize_classes(class_names=class_names, recording_time=6) # Visualize the isolated data
     #train_odh= offline_dh.isolate_data("reps", [0,1,2])
     #test_odh = offline_dh.isolate_data("reps", [3,4])
     train_odh = odh_ex_rest.isolate_data("reps", [0,1,2])
     test_odh = odh_ex_rest.isolate_data("reps", [3,4])
+    for seg_idx, segment in enumerate(train_odh.classes):
+        # Flatten all class values from this segment (in case of multiple channels)
+        unique_classes_in_segment = np.unique(segment)
+        
+        for class_idx, class_name in class_names.items():
+            if class_idx in unique_classes_in_segment:
+                class_name_to_segments[class_name].append(seg_idx)
     #test_odh.visualize(block=False)
     train_windows, train_metadata = train_odh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
     test_windows, test_metadata = test_odh.parse_windows(WINDOW_SIZE, WINDOW_INCREMENT, metadata_operations=metadata_operations)
@@ -174,13 +295,20 @@ if __name__ == '__main__':
     visualize_features = True # Set to True to visualize the features, False to skip visualization
     if visualize_features == True:
         feat_dict = fe.extract_features(feature_list, train_windows, array=False)
-        fe.visualize(feat_dict, class_names=class_names)
+        plot_emg_data_and_features(train_odh.data, 
+                                   features_dict=feat_dict,
+                                   class_names_dict=class_name_to_segments,
+                                   window_size=WINDOW_SIZE,
+                                   window_increment=WINDOW_INCREMENT)
+
+        #fe.visualize(feat_dict, class_names=class_names)
     # Step 3: Dataset creation
+    
     data_set = {}
     print("Creating dataset")
     data_set['training_features'] = training_features
     data_set['training_labels'] = train_metadata[labels_key]
-
+    
     filter = FlutterRejectionFilter(tanh_gain=1.5, dt=0.014, integrator_enabled=True, gain=1.1)
     test_nr = 25
     if regression_selected:
@@ -225,6 +353,7 @@ if __name__ == '__main__':
             filtered_pred_color = 'forestgreen'
             label_color = 'blue'
             x = np.arange(test_labels.shape[0])
+            x = np.arange(test_labels.shape[0])*100/2000 + (400/2000)  # Adjust x-axis for time in seconds
             handles = [mpatches.Patch(color=label_color, label='True Labels'), 
                        mlines.Line2D([], [], color=pred_color, marker='o', markersize=marker_size, linestyle='None', label='Predictions'),
                        mlines.Line2D([], [], color=filtered_pred_color, linestyle='-', label='Filtered Predictions')]

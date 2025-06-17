@@ -1,8 +1,24 @@
 {
-    "gain_mf1": 1.0,
-    "gain_mf2": 1.0,
-    "thr_angle_mf1": 40,
-    "thr_angle_mf2": 26,
-    "deadband": 0.20000001788139343,
-    "num_motor_functions": 2
+    "gain_hand_open": 1.4000000953674316,
+    "gain_hand_close": 2.000000238418579,
+    "gain_pronation": 1.3000000715255737,
+    "gain_supination": 1.7000001668930054,
+    "thr_angle_mf1": 45,
+    "thr_angle_mf2": 45,
+    "deadband_radius": 0.20000000298023224,
+    "window_size": 400,
+    "window_increment": 100,
+    "training_data_folder": "data/regression/separated-motions/s1-0616-2",
+    "training_media_folder": "animation/saw_tooth",
+    "model_str": "LR",
+    "selected_features": {
+        "MAV": true,
+        "ZC": true,
+        "WL": true,
+        "MYOP": true
+    },
+    "tanh_gain": 0.5,
+    "dt": 0.2999999225139618,
+    "integrator_enabled": true,
+    "gain": 1.0
 }

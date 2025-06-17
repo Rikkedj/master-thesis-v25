@@ -8,6 +8,14 @@ media/
 data/
 plots/
 test-data/
+post_training_parameters/
+tests/plots/
+tests/__pycache__/
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore code structure tree
+code_structure.txt
 
 # Ignore Python cache files
 __pycache__/

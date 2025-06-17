@@ -1,6 +1,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
+import matplotlib as mpl
+# Use LaTeX-style fonts
+mpl.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.size": 10,
+    "axes.labelsize": 10,
+    "legend.fontsize": 9,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "figure.dpi": 300
+})
 def _generate_sawtooth_signal(rise_time, hold_time, rest_time, n_repeats, sampling_rate, amplitude=1):
         """
         Generate a sawtooth signal that rises linearly over 'rise_time' seconds, then rests flat for 'rest_time' seconds.
@@ -79,10 +90,10 @@ def generate_and_plot_signal(transition_duration, hold_duration, rest_duration, 
         # Plot
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(time, signal, label='Generated Signal')
-        ax.set_xlabel('Time (s)')
-        ax.set_ylabel('s(t)')
+        ax.set_xlabel('Time (s)', fontsize=18)
+        ax.set_ylabel('s(t)', fontsize=18)
         #ax.axvline(x=t_hold_high_start, color='green', linestyle='--', label='Hold High Start')
-        ax.set_title('Base signal for system training')
+        #ax.set_title('Base signal for system training')
         ax.grid(True)
 
         # Vertical positions for text just above signal levels
@@ -97,7 +108,7 @@ def generate_and_plot_signal(transition_duration, hold_duration, rest_duration, 
         ax.set_ylim(-0.2, 1.2)
         plt.tight_layout()
         save_path = 'c:/Users/rikkedj/OneDrive - NTNU/skole/10.semester - MASTER/Figures/training prompt/base_signal_half_tooth.pdf'
-        plt.savefig(save_path, dpi=300)
+        plt.savefig(save_path, dpi=300, format='pdf', bbox_inches='tight')
         plt.show()
 
         return signal
