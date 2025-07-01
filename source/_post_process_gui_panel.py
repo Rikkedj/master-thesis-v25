@@ -36,7 +36,7 @@ from plotter import plot_emg_data_and_features, PredictionPlotter
 from ml_help_functions import auto_split_reps
 
 # Class made by me
-class ParameterAdjustmentPanel:
+class PostProcessingPanel:
     '''
     The Model Configuration Panel for configuring the machine learning model.
 

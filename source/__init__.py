@@ -1,3 +1,3 @@
 from source import filters
-from source import parameterGUI
-from source import _parameter_gui_panel
+from source import post_process_GUI
+from source import _post_process_gui_panel

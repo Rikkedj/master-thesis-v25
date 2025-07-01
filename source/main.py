@@ -19,7 +19,7 @@ from libemg.environments.controllers import ClassifierController, RegressorContr
 from libemg.environments.fitts import ISOFitts, FittsConfig
 from libemg.post_processing import PostPredictionAdjuster, FlutterRejectionFilter
 
-from parameterGUI import ParameterAdjustmentGUI
+from post_process_GUI import PostProcessingGUI
 
 class ProsthesisControlGUI:
     """
@@ -85,6 +85,12 @@ class ProsthesisControlGUI:
             'NE': Path('media/videos', 'IMG_4930.MOV'), 
             'NW': Path('media/videos', 'IMG_4931.MOV')
         }
+
+        self.available_models = {
+            'Regression': ['LR', 'SVR','MLP', 'RF', 'GB'],  # Linear Regression, Support Vector Regression, Multi-Layer Perceptron, Random Forest, Gradient Boosting
+            'Classification': ['LDA', 'KNN', 'SVM', 'MLP', 'RF', 'QDA', 'NB']  # Linear Discriminant Analysis, K-Nearest Neighbors, Support Vector Machine, Multi-Layer Perceptron, Random Forest, Quadratic Discriminant Analysis, Naive Bayes
+        }
+
         self.window = None
         self.initialize_ui()
         self.window.mainloop()
@@ -192,10 +198,10 @@ class ProsthesisControlGUI:
         #     #self.training_media_folder = 'media/images/'
         #     args = {'media_folder': media_folder, 'data_folder': Path('data', 'classification').absolute().as_posix()} # self.training_media_folder
         
-        training_ui = GUI(self.odh, args=args, width=1100, height=1000, gesture_height=700, gesture_width=700)
+        training_ui = GUI(self.odh, args=args, width=1100, height=1000, gesture_height=700, gesture_width=700, regression_selected=self.regression_selected(), motion_classes=self.motion_classes, axis_media=self.axis_media)
         #training_ui.download_gestures([1,2,3,6,7], "media/images/") # Downloading gestures from github repo. Videos for simultaneous gestures are located in images_master/videos
-        if self.regression_selected():
-            self.create_animation(transition_duration=2, hold_duration=2, rest_duration=0) # Create animations for the intended motions used in the training prompt.
+        #if self.regression_selected():
+        #    self.create_animation(transition_duration=2, hold_duration=2, rest_duration=0) # Create animations for the intended motions used in the training prompt.
         training_ui.start_gui()
         self.initialize_ui()
     
@@ -220,7 +226,7 @@ class ProsthesisControlGUI:
             return
         
         default_params = {'window_size':400, 'window_increment':100, 'deadband': 0., 'thr_angle_mf1': 45, 'thr_angle_mf2': 45, 'gain_mf1': 1, 'gain_mf2': 1} #deafult values for the parameters. 
-        adjust_param_ui = ParameterAdjustmentGUI(online_data_handler=self.odh, 
+        adjust_param_ui = PostProcessingGUI(online_data_handler=self.odh, 
                                                  regression_selected=self.regression_selected(), 
                                                  model_str=model_str, 
                                                  axis_media=self.axis_media, 
@@ -231,34 +237,54 @@ class ProsthesisControlGUI:
         adjust_param_ui.start_gui()
         self.initialize_ui() # When the user is done adjusting parameters, the GUI will be closed and the main menu will be re-opened.
 
-    # Sourced from LibEMG Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git
+    # Adapted from LibEMG Menu.py from https://github.com/LibEMG/LibEMG_Isofitts_Showcase.git
     def start_test(self):
-        self.window.destroy()
-        success = self.set_up_model()
-        if not success:
-            return
+        try:
+            # Validate the results file before destroying the UI
+            save_file = self.results_file.get()
+            if not save_file or not (save_file.endswith(".pkl") or save_file.endswith(".json")):
+                messagebox.showerror("Invalid Path", "Please provide a valid results file path ending in .pkl or .json.")
+                self.initialize_ui()
+                return  # Exit without proceeding
 
-        save_file = self.results_file.get()
-        if not save_file or not (save_file.endswith(".pkl") or save_file.endswith(".json")):
-            messagebox.showerror("Invalid Path", "No result file for Fitts test given, or invalid file extension. Please provide a .pkl or .json file.")
-            self.initialize_ui()
-            return
-        
-        if self.regression_selected():
-            controller = RegressorController(ip=self.controller_IP, port=self.controller_PORT) 
-            #save_file = Path('results', self.model_str.get() +'_reg'+ '_unconstrained_NOT_flutter_NOT_tresh' + ".pkl").absolute().as_posix()
-        else:
-            controller = ClassifierController(ip=self.controller_IP, port=self.controller_PORT, output_format=self.predictor.output_format, num_classes=len(self.motion_classes)) # NOTE! num_classes hardcoded -> get from config
-            #save_file = Path('results', self.model_str.get() + '_clf' + ".pkl").absolute().as_posix()
-        
-        config = FittsConfig(num_trials=16, save_file=save_file)
-        ISOFitts(controller, config, post_prediction_adjuster=self.post_prediction_adjuster, flutter_rejection_filter=self.flutter_rejection_filter).run()
-        # Its important to stop the model after the game has ended
-        # Otherwise it will continuously run in a seperate process
-        self.predictor.stop_running()
-        self.initialize_ui()
+            # Attempt to set up the model
+            success = self.set_up_model()
+            if not success:
+                return  # Exit if model setup fails
 
-    
+            # Safe to destroy window now
+            self.window.destroy()
+            window_destroyed = True
+
+            print(f"Results file for Fitts test: {save_file}")
+
+            # Create the correct controller
+            if self.regression_selected():
+                controller = RegressorController(ip=self.controller_IP, port=self.controller_PORT)
+            else:
+                controller = ClassifierController(
+                    ip=self.controller_IP,
+                    port=self.controller_PORT,
+                    output_format=self.predictor.output_format,
+                    num_classes=len(self.motion_classes)
+                )
+
+            # Configure and run the IsoFitts test
+            config = FittsConfig(num_trials=16, save_file=save_file)
+            ISOFitts(controller, config,
+                    post_prediction_adjuster=self.post_prediction_adjuster,
+                    flutter_rejection_filter=self.flutter_rejection_filter).run()
+
+            # Stop the predictor after the test
+            self.predictor.stop_running()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {e}")
+        finally:
+            if window_destroyed:
+                # Only re-initialize the UI if the old one was destroyed
+                self.initialize_ui()
+
     # --------- Helper functions for the buttons in the menu -----------
     def _create_default_parameters(self, file_path):
         """Creates a default model parameters and saves it to a JSON file."""
@@ -328,13 +354,13 @@ class ProsthesisControlGUI:
         media_folder = self.training_media_folder.get()
         if not media_folder or not Path(media_folder).exists():
             messagebox.showerror("Invalid Path", "Media folder does not exist. Please provide a valid path.")
-            self.initialize_ui()
+            #self.initialize_ui()
             return False
         # 3. Validate data folder
         data_folder = self.training_data_folder.get()
         if not data_folder or not Path(data_folder).exists():
             messagebox.showerror("Invalid Path", "Data folder does not exist. Please provide a valid path.")
-            self.initialize_ui()
+            #self.initialize_ui()
             return False
         # # Set the data folder based on the model type
         # if self.regression_selected():
@@ -348,7 +374,7 @@ class ProsthesisControlGUI:
                 self.collection_details = json.load(f)
         except Exception as e:
             messagebox.showerror("Load Error", f"Could not load collection_details.json: {e}")
-            self.initialize_ui()
+            #self.initialize_ui()
             return False
         
         # 4. Process filters and metadata
@@ -407,7 +433,6 @@ class ProsthesisControlGUI:
 
         except Exception as e:
             messagebox.showerror("Metadata Error", f"Could not process metadata: {e}")
-            self.initialize_ui()
             return False
 
         # 5. Parse training data and fit model
@@ -431,8 +456,16 @@ class ProsthesisControlGUI:
             model = self.model_str.get()
             if not model:
                 messagebox.showerror("Model Error", "Please select a valid model type.")
-                self.initialize_ui()
                 return False
+            if self.regression_selected():
+                if model not in self.available_models['Regression']:
+                    messagebox.showerror("Model Error", f"Invalid regression model selected: {model}. Available options: {self.available_models['Regression']}")
+                    return False
+            else:
+                if model not in self.available_models['Classification']:
+                    messagebox.showerror("Model Error", f"Invalid classification model selected: {model}. Available options: {self.available_models['Classification']}")
+                    return False
+                
             print('Fitting model...')
 
             if self.regression_selected():
@@ -451,7 +484,6 @@ class ProsthesisControlGUI:
             self.predictor.run(block=False) # block set to false so it will run in a seperate process.
         except Exception as e:
             messagebox.showerror("Training Error", f"Model training or prediction failed: {e}")
-            self.initialize_ui()
             return False
         
         return True

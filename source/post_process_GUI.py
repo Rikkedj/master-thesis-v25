@@ -1,10 +1,11 @@
 import dearpygui.dearpygui as dpg
 import time
 import inspect
-from _parameter_gui_panel import ParameterAdjustmentPanel # Could remove this to my own folder or something to make it clear its made by me
+
+from _post_process_gui_panel import PostProcessingPanel # Could remove this to my own folder or something to make it clear its made by me
 
 
-class ParameterAdjustmentGUI: 
+class PostProcessingGUI: 
     '''
     The GUI for adjusting the parameters for the predictor (either the classifier or the regressor) and the motor controller.
 
@@ -116,9 +117,9 @@ class ParameterAdjustmentGUI:
         self._adjust_param_callback()
                 
     def _adjust_param_callback(self):
-        panel_arguments = list(inspect.signature(ParameterAdjustmentPanel.__init__).parameters) 
+        panel_arguments = list(inspect.signature(PostProcessingPanel.__init__).parameters) 
         passed_arguments = {i: self.params[i] for i in self.params.keys() if i in panel_arguments} 
-        self.pap = ParameterAdjustmentPanel(**passed_arguments, gui=self, training_data_folder=self.training_data_folder, training_media_folder=self.training_media_folder) # Could give only gui as input and extrct training folders from there
+        self.pap = PostProcessingPanel(**passed_arguments, gui=self, training_data_folder=self.training_data_folder, training_media_folder=self.training_media_folder) # Could give only gui as input and extrct training folders from there
         self.pap.spawn_configuration_window()
 
 
